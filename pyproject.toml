@@ -1,0 +1,11 @@
+[project]
+name = "imu"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "click==8.1.7",
+    "pynmea2==1.19.0",
+    "pyserial==3.4",
+]
