@@ -3,18 +3,19 @@ import sys
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any, List, TextIO, Tuple, Union
 
 import click
 import serial
 
-from parsers.anrot_serial_parser import AnrotSerialParser
+from parsers.anrot_serial_parser import AnrotSerialParser, AnrotFrame
 
 
 MAX_NODES = 16
 NODE_FIELD_COUNT = 17
 
 
-def build_csv_header():
+def build_csv_header() -> List[str]:
     header = ["UnixTimeStamp(sec)", "SystemTime(ms)"]
     for node_num in range(1, MAX_NODES + 1):
         header.extend([
@@ -39,20 +40,20 @@ def build_csv_header():
     return header
 
 
-def build_group_output_path(output, group_id):
+def build_group_output_path(output, group_id) -> Path:
     output_path = Path(output)
     suffix = output_path.suffix or ".csv"
     stem = output_path.stem if output_path.suffix else output_path.name
     return output_path.with_name(f"{stem}_{group_id}{suffix}")
 
 
-def format_number(value, precision):
+def format_number(value, precision) -> str:
     if value is None:
         return ""
     return f"{value:.{precision}f}"
 
 
-def append_node_fields(row, frame):
+def append_node_fields(row, frame) -> None:
     row.extend([
         frame.node_id if frame.node_id is not None else "",
         format_number(frame.acc[0], 3) if frame.acc is not None else "",
@@ -74,7 +75,7 @@ def append_node_fields(row, frame):
     ])
 
 
-def build_csv_row(frames):
+def build_csv_row(frames) -> List[object]:
     first_frame = frames[0]
     frames_by_index = {
         frame.node_index: frame
@@ -93,7 +94,7 @@ def build_csv_row(frames):
     return row
 
 
-def split_gateway_packets(frames):
+def split_gateway_packets(frames) -> List[List[AnrotFrame]]:
     packets = []
     current_packet = []
 
@@ -118,7 +119,7 @@ def split_gateway_packets(frames):
     return packets
 
 
-def open_group_writer(group_writers, stack, output, group_id):
+def open_group_writer(group_writers, stack, output, group_id) -> Tuple[Any, TextIO, Path]:
     if group_id in group_writers:
         return group_writers[group_id]
 
@@ -130,7 +131,7 @@ def open_group_writer(group_writers, stack, output, group_id):
     return group_writers[group_id]
 
 
-def get_packet_group_id(packet_frames):
+def get_packet_group_id(packet_frames) -> Union[int, str]:
     group_id = packet_frames[0].gw_id
     if group_id is None:
         return "unknown"
@@ -141,7 +142,8 @@ def get_packet_group_id(packet_frames):
 @click.option("--ports", "-p", required=True, help="Serial ports separated by commas, such as COM3,COM4.")
 @click.option("--baudrate", "-b", default="115200", help="The baud rate for the serial connection (default: 115200).")
 @click.option("--output", "-o", default="recorded_data.csv", help="The output CSV file prefix (default: recorded_data.csv). Files are written as <output>_<group id>.csv.")
-def cmd_record(ports, baudrate, output):
+@click.option("--duration", "-d", type=click.FloatRange(min=0, min_open=True), default=None, help="Recording duration in seconds. Record until interrupted when omitted.")
+def cmd_record(ports, baudrate, output, duration) -> None:
     if not baudrate.isdigit() or int(baudrate) <= 0:
         raise click.BadParameter("Invalid baudrate. Baudrate must be a positive integer.")
 
@@ -161,7 +163,13 @@ def cmd_record(ports, baudrate, output):
                 for port in port_list
             }
 
-            while True:
+            recording_deadline = (
+                time.monotonic() + duration
+                if duration is not None
+                else None
+            )
+
+            while recording_deadline is None or time.monotonic() < recording_deadline:
                 for port, ser in serial_ports.items():
                     if not ser.in_waiting:
                         continue
