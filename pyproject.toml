@@ -9,3 +9,26 @@ dependencies = [
     "pynmea2==1.19.0",
     "pyserial==3.4",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["anrot_imu_driver"]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "-ra",
+    "-m",
+    "not hardware and not slow and not dataset",
+]
+markers = [
+    "scenario(capability, name): link a test to an exact OpenSpec Scenario",
+    "hardware: requires attached physical hardware",
+    "slow: takes too long for the default fast suite",
+    "dataset: requires an external or generated dataset",
+]

@@ -142,7 +142,7 @@ def get_packet_group_id(packet_frames) -> Union[int, str]:
 @click.option("--ports", "-p", required=True, help="Serial ports separated by commas, such as COM3,COM4.")
 @click.option("--baudrate", "-b", default="115200", help="The baud rate for the serial connection (default: 115200).")
 @click.option("--output", "-o", default="recorded_data.csv", help="The output CSV file prefix (default: recorded_data.csv). Files are written as <output>_<group id>.csv.")
-@click.option("--duration", "-d", type=click.FloatRange(min=0, min_open=True), default=None, help="Recording duration in seconds. Record until interrupted when omitted.")
+@click.option("--duration", "-d", type=click.FloatRange(min=0, min_open=True), default=10, help="Recording duration in seconds (default: 10).")
 def cmd_record(ports, baudrate, output, duration) -> None:
     if not baudrate.isdigit() or int(baudrate) <= 0:
         raise click.BadParameter("Invalid baudrate. Baudrate must be a positive integer.")

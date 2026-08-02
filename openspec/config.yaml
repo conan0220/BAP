@@ -1,0 +1,20 @@
+schema: spec-driven
+
+context: |
+  Before creating or updating OpenSpec artifacts, read the repository-root AGENTS.md and follow its links to the authoritative system context.
+
+rules:
+  specs:
+    - Every Scenario must describe observable, testable behavior; if no viable test can be identified, refine the requirement before completing the spec.
+  tasks:
+    - Every spec Scenario must map to at least one automated, contract, or hardware-in-the-loop test task.
+
+operations:
+  apply:
+    guidance:
+      - Maintain traceability from every spec Scenario to at least one test and run the relevant tests before completing a task.
+  archive:
+    guidance:
+      - Confirm that change verification finds no uncovered Scenarios before archiving.
+      - After archive and spec synchronization succeed, remind the user to review the Git diff and create a commit containing the implementation, tests, synchronized main specs, and archived change artifacts.
+      - Do not create the Git commit automatically without explicit user approval.
