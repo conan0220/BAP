@@ -1,0 +1,1 @@
+"""BAP Desktop App resources."""

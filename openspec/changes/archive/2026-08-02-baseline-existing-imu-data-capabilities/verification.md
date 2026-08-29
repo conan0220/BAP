@@ -1,42 +1,42 @@
-# Verification Record
+# 驗證紀錄
 
-## Scope
+## 範圍
 
-- Change: `baseline-existing-imu-data-capabilities`
-- Verification method: equivalent recorded review because the installed core OpenSpec profile does not provide a verification skill
-- Reviewed capabilities: `imu-data-parsing`, `imu-device-communication`, and `imu-data-recording`
+- 變更：`baseline-existing-imu-data-capabilities`
+- 驗證方法：採用等效的書面審查，因為已安裝的 OpenSpec core profile 未提供驗證 skill
+- 已審查能力：`imu-data-parsing`、`imu-device-communication` 與 `imu-data-recording`
 
-## Completeness
+## 完整性
 
-- Collected 58 individually identifiable pytest cases.
-- Ran the pytest Scenario audit against all `#### Scenario` headings in the three delta specs.
-- The audit reported no uncovered Scenarios and no unknown Scenario markers.
-- Every implementation task in `tasks.md` has corresponding test or verification evidence.
+- 收集了 58 個可個別識別的 pytest 案例。
+- 針對三份 delta specs 中的所有 `#### Scenario` 標題執行 pytest Scenario 稽核。
+- 稽核未發現未涵蓋的 Scenarios，也未發現未知的 Scenario markers。
+- `tasks.md` 中的每項實作任務皆有對應的測試或驗證證據。
 
-## Correctness
+## 正確性
 
-- Parser characterization tests: 18 passed.
-- Device-communication characterization tests: 17 passed.
-- Recorder characterization tests: 23 passed.
-- Complete default suite with branch coverage: 58 passed, 82% total branch-aware coverage.
-- Strict OpenSpec validation reported the change as valid.
-- The tests characterize the existing working-tree behavior without changing runtime source files. The only runtime diff remains the pre-existing user modification that sets the recording duration default to 10 seconds.
+- Parser 特性描述測試：18 項通過。
+- 裝置通訊特性描述測試：17 項通過。
+- Recorder 特性描述測試：23 項通過。
+- 含 branch coverage 的完整預設套件：58 項通過，整體 branch-aware coverage 為 82%。
+- 嚴格 OpenSpec 驗證回報此變更有效。
+- 測試描述既有 working tree 行為的特性，未變更任何 runtime source files。唯一的 runtime diff 仍是先前已存在的使用者修改：將預設記錄時間設為 10 秒。
 
-## Coherence
+## 一致性
 
-- The proposal, three delta specs, design decisions, implementation tasks, and test Scenario markers describe the same three baseline capabilities.
-- `openspec/config.yaml` establishes repository-wide testability and Scenario-to-test guidance; this change supplies the first concrete test foundation and application.
-- Hardware behavior, punch analysis, force-plate integration, new recording formats, and runtime fixes remain outside this change.
-- No uncovered Scenario, artifact contradiction, or implementation blocker remains.
+- Proposal、三份 delta specs、設計決策、實作任務與測試 Scenario markers 描述相同的三項基準能力。
+- `openspec/config.yaml` 建立全 repository 適用的可測試性與 Scenario-to-test 指引；本變更提供第一套具體測試基礎及其應用。
+- 硬體行為、出拳分析、force plate 整合、新記錄格式與 runtime 修正仍不在本變更範圍內。
+- 不存在未涵蓋的 Scenario、artifact 矛盾或實作阻礙。
 
-## Commands
+## 命令
 
 ```text
-D:\repos\BoxingLens\.venv\Scripts\python.exe -m pytest tests --collect-only -q --scenario-spec-root openspec\changes\baseline-existing-imu-data-capabilities\specs
-D:\repos\BoxingLens\.venv\Scripts\python.exe -m pytest tests --scenario-spec-root openspec\changes\baseline-existing-imu-data-capabilities\specs --cov=anrot_imu_driver --cov-branch --cov-report=term-missing
+D:\repos\BAP\.venv\Scripts\python.exe -m pytest tests --collect-only -q --scenario-spec-root openspec\changes\baseline-existing-imu-data-capabilities\specs
+D:\repos\BAP\.venv\Scripts\python.exe -m pytest tests --scenario-spec-root openspec\changes\baseline-existing-imu-data-capabilities\specs --cov=anrot_imu_driver --cov-branch --cov-report=term-missing
 C:\Users\user\AppData\Roaming\npm\openspec.cmd validate baseline-existing-imu-data-capabilities --type change --strict --no-interactive
 ```
 
-## Result
+## 結果
 
-The change is complete, correct, coherent, and ready for archive review.
+此變更已具備完整性、正確性與一致性，可進行封存審查。

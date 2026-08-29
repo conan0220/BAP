@@ -1,6 +1,6 @@
-# BoxingLens Agent Guide
+# BAP Agent Guide
 
-This file is part of the repository's agent harness. It helps agents locate relevant context and does not define BoxingLens product requirements.
+This file is part of the repository's agent harness. It helps agents locate relevant context and does not define BAP product requirements.
 
 ## Before Starting
 
@@ -15,10 +15,10 @@ The repository harness separates Agent instructions, descriptive context, normat
 | Location | Responsibility | Boundary |
 |---|---|---|
 | `AGENTS.md` | Repository-level Agent entry point, navigation map, and information-boundary rules | Must not contain product requirements, detailed domain knowledge, or implementation plans |
-| `.codex/skills/` | Reusable Agent workflows and task-specific operating instructions | Must not become a source of BoxingLens requirements or repository-specific domain facts |
-| `docs/knowledge/` | Stable domain facts, concepts, formats, constraints, and explanations | Must not define BoxingLens requirements, planned features, or implementation tasks |
+| `.codex/skills/` | Reusable Agent workflows and task-specific operating instructions | Must not become a source of BAP requirements or repository-specific domain facts |
+| `docs/knowledge/` | Stable domain facts, concepts, formats, constraints, and explanations | Must not define BAP requirements, planned features, or implementation tasks |
 | `docs/guides/` | Procedures that can be followed now, including setup, operation, verification, and troubleshooting | Must not describe future features, desired system behavior, or development plans |
-| `docs/references/` | Original external source material such as vendor datasheets and manuals | Treat as evidence, not as BoxingLens requirements; do not rewrite vendor material as project policy |
+| `docs/references/` | Original external source material such as vendor datasheets and manuals | Treat as evidence, not as BAP requirements; do not rewrite vendor material as project policy |
 | `openspec/config.yaml` | OpenSpec bootstrap context that directs Agents to the repository harness | Keep it minimal; do not duplicate navigation, domain knowledge, or requirements from other sources |
 | `openspec/goals/` | Non-normative system vision, purpose, intended users, and long-term direction | May reference `docs/`; must not contain formal requirements, scenarios, technical designs, or implementation tasks |
 | `openspec/specs/` | Authoritative, normative requirements for system behavior | Describe observable behavior and avoid implementation task lists |

@@ -1,7 +1,7 @@
-# BoxingLens System Goal
+# BAP 系統目標
 
-The core goal of BoxingLens is to build a boxing-focused analytics system that transforms movement and strike data generated during training into reliable, easy-to-understand, and comparable insights into individual performance.
+BAP（Boxing Analysis Platform）的核心目標是建立一套聚焦於拳擊的分析系統，將訓練期間產生的動作與擊打資料，轉化為可靠、易於理解且可相互比較的個人表現洞察。
 
-The system covers analytical capabilities such as punch force, punch speed, punch count, punch trajectory, and punch-type recognition. These capabilities should continue to expand and improve as research advances.
+本系統涵蓋拳力、拳速、出拳次數、出拳軌跡與拳種辨識等分析能力。這些能力應隨研究進展持續擴充與改善。
 
-Ultimately, BoxingLens should provide an easy-to-use application interface that helps boxing practitioners, athletes, coaches, and researchers understand a user's boxing performance, track long-term changes, and support more evidence-based training and research.
+BAP 的最終目標是提供容易使用的應用程式介面，協助拳擊練習者、運動員、教練與研究人員了解使用者的拳擊表現、追蹤長期變化，並支援更以證據為基礎的訓練與研究。

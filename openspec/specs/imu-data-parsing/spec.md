@@ -1,59 +1,92 @@
-# imu-data-parsing Specification
+# imu-data-parsing 規格
+
+## 名詞定義
+
+| 名詞 | 定義 |
+|---|---|
+| Requirement | 系統必須符合的單一可驗證需求。 |
+| Scenario | 以特定條件與預期結果描述 Requirement 的可驗證案例；英文標題同時作為 pytest 追溯識別符。 |
+| `SHALL`／`SHALL NOT` | OpenSpec 的規範性關鍵字，分別表示「必須」與「不得」。 |
+| `WHEN` | Scenario 中觸發行為的條件或輸入。 |
+| `THEN` | Scenario 中系統應產生的可觀察結果。 |
+| ANROT | HI221 裝置通訊所使用的二進位資料協定。 |
+| frame | 具備同步標記、payload 長度、payload 與 CRC 等結構的一個完整二進位傳輸單位。 |
+| synchronization sequence | 用來辨識 frame 起點的固定 bytes；本規格中的值為 `0x5A 0xA5`。 |
+| payload | frame 中承載實際裝置資料的內容；其格式由 payload type 決定。 |
+| parser | 接收原始 bytes 或文字，並將其解碼為結構化量測資料的元件。 |
+| incremental parsing | 可跨多次呼叫保留未完成輸入，待資料完整後再解碼的解析方式。 |
+| byte | 二進位資料的基本單位，由 8 個 bits 組成。 |
+| chunk | 單次 parser call 收到的一段輸入資料；不保證包含完整 frame 或 sentence。 |
+| CRC-16 | 用於檢查 ANROT frame 完整性的 16-bit cyclic redundancy check。 |
+| checksum | 用於檢查 NMEA sentence 傳輸內容是否正確的驗證值。 |
+| NMEA | 以文字 sentence 表示導航或感測器資料的通訊格式。 |
+| sentence | 一筆以 newline 結尾、包含 sentence type、fields 與 checksum 的 NMEA 訊息。 |
+| structured measurement | Parser 解碼後，以具名欄位表示的感測器量測資料。 |
+| gateway | 彙整一個或多個 IMU node 資料並送出 gateway payload 的裝置。 |
+| gateway ID | 用來識別資料來源 gateway 的識別碼。 |
+| node | 由 gateway 管理並產生感測器量測資料的單一 IMU 裝置。 |
+| node ID | 用來識別 gateway 中特定 node 的識別碼。 |
+| gateway timestamp | Gateway 提供且由同一 packet 內 nodes 共用的時間值；本規格以毫秒表示。 |
+| packet position | Node measurement 在 gateway packet 中的位置索引；本規格從 0 開始。 |
+| scale factor | 將 protocol 中的原始數值轉換為物理單位數值所使用的倍率。 |
+| quaternion | 以 W、X、Y、Z 四個分量表示三維姿態旋轉的方法。 |
+| roll／pitch／yaw | 分別描述繞三個軸旋轉的 Euler angles，本規格以 degrees 表示。 |
+| newline | 表示 NMEA sentence 結束的換行字元。 |
 
 ## Purpose
 
-Define the existing incremental decoding behavior that converts supported ANROT binary frames and checksummed NMEA text sentences into structured sensor measurements.
+定義既有的增量解碼行為：將支援的 ANROT 二進位 frame 與含 checksum 的 NMEA 文字 sentence 轉換為結構化感測器量測資料。
 
 ## Requirements
 
-### Requirement: Incremental ANROT binary framing
-The binary parser SHALL buffer arbitrarily divided input bytes, identify frames beginning with `0x5A 0xA5`, use the declared payload length to await a complete frame, and emit measurements only for frames whose CRC-16 matches the received CRC.
+### Requirement: 增量 ANROT 二進位 framing
+Binary parser SHALL 緩衝任意分段的輸入 bytes、識別以 `0x5A 0xA5` 開頭的 frames、使用宣告的 payload length 等待完整 frame，且僅對計算出的 CRC-16 與接收 CRC 相符的 frames 輸出量測資料。
 
 #### Scenario: A valid frame arrives in multiple chunks
-- **WHEN** the bytes of a valid ANROT frame are supplied across multiple parser calls
-- **THEN** the parser retains the incomplete bytes and emits the decoded frame only after the complete CRC-valid frame is available
+- **WHEN** 有效 ANROT frame 的 bytes 分散在多次 parser calls 中提供
+- **THEN** parser 會保留不完整的 bytes，並僅在取得 CRC 有效的完整 frame 後輸出 decoded frame
 
 #### Scenario: Noise precedes a valid frame
-- **WHEN** unrelated bytes precede a valid ANROT synchronization sequence
-- **THEN** the parser discards bytes before the synchronization sequence and decodes the valid frame
+- **WHEN** 有效 ANROT synchronization sequence 前存在無關 bytes
+- **THEN** parser 會捨棄 synchronization sequence 之前的 bytes，並解碼有效 frame
 
 #### Scenario: A complete frame has an invalid CRC
-- **WHEN** a complete ANROT frame's calculated CRC does not equal its received CRC
-- **THEN** the parser emits no measurement for that frame and continues accepting later input
+- **WHEN** 完整 ANROT frame 的計算 CRC 不等於接收的 CRC
+- **THEN** parser 不會為該 frame 輸出任何量測資料，並會繼續接受後續輸入
 
-### Requirement: Supported single-device ANROT payloads
-The binary parser SHALL decode supported `0x91`, `0x92`, and `0x81` payloads into their available timestamp, acceleration, angular velocity, magnetic field, orientation, environment, navigation, and status fields using the format-specific scale factors.
+### Requirement: 支援的單一裝置 ANROT payloads
+Binary parser SHALL 使用各格式專屬的 scale factors，將支援的 `0x91`、`0x92` 與 `0x81` payloads 解碼為其中可用的 timestamp、acceleration、angular velocity、magnetic field、orientation、environment、navigation 與 status 欄位。
 
 #### Scenario: Decode a supported single-device payload
-- **WHEN** a CRC-valid ANROT frame contains a supported `0x91`, `0x92`, or `0x81` payload
-- **THEN** the parser emits one structured frame with the fields provided by that payload converted to the units defined by the parser's format mapping
+- **WHEN** CRC 有效的 ANROT frame 包含支援的 `0x91`、`0x92` 或 `0x81` payload
+- **THEN** parser 會輸出一個 structured frame，其中該 payload 提供的欄位已轉換為 parser format mapping 所定義的單位
 
-### Requirement: Compact multi-node gateway payload decoding
-The binary parser SHALL decode an ANROT `0x63` gateway payload into no more than 16 node measurements. Each emitted node measurement SHALL include the gateway ID, node ID, shared gateway timestamp in milliseconds, node count, zero-based packet position, three-axis acceleration in g, three-axis magnetic field in microtesla, three-axis angular velocity in degrees per second, quaternion, and roll, pitch, and yaw in degrees.
+### Requirement: 緊湊型多 node gateway payload 解碼
+Binary parser SHALL 將 ANROT `0x63` gateway payload 解碼為不超過 16 筆 node measurements。每筆輸出的 node measurement SHALL 包含 gateway ID、node ID、以毫秒為單位的 shared gateway timestamp、node count、zero-based packet position、以 g 為單位的三軸 acceleration、以 microtesla 為單位的三軸 magnetic field、以 degrees per second 為單位的三軸 angular velocity、quaternion，以及以 degrees 為單位的 roll、pitch 與 yaw。
 
 #### Scenario: Decode a complete multi-node gateway payload
-- **WHEN** a CRC-valid `0x63` payload declares node blocks that are fully present
-- **THEN** the parser emits one structured measurement per decoded node block with the shared gateway metadata and scaled sensor values
+- **WHEN** CRC 有效的 `0x63` payload 宣告的 node blocks 均完整存在
+- **THEN** parser 會為每個 decoded node block 輸出一筆 structured measurement，並包含 shared gateway metadata 與縮放後的 sensor values
 
 #### Scenario: Gateway declares more than 16 nodes
-- **WHEN** a `0x63` payload declares more than 16 nodes
-- **THEN** the parser emits measurements for at most the first 16 node blocks
+- **WHEN** `0x63` payload 宣告超過 16 個 nodes
+- **THEN** parser 最多只會輸出前 16 個 node blocks 的量測資料
 
 #### Scenario: Final node block is incomplete
-- **WHEN** the remaining `0x63` payload bytes cannot provide a complete 34-byte node block
-- **THEN** the parser emits the node blocks decoded before the incomplete block and does not fabricate the missing measurement
+- **WHEN** 剩餘的 `0x63` payload bytes 無法提供完整的 34-byte node block
+- **THEN** parser 會輸出在不完整 block 之前已解碼的 node blocks，且不會捏造遺漏的量測資料
 
-### Requirement: Incremental checksummed NMEA parsing
-The NMEA parser SHALL buffer text until a newline-terminated sentence is available, validate its checksum, and emit structured data only for supported `GGA`, `RMC`, `VTG`, `GSA`, `GSV`, and `SXT` sentence types.
+### Requirement: 增量解析含 checksum 的 NMEA
+NMEA parser SHALL 緩衝文字，直到有以 newline 結尾的 sentence 可用為止、驗證其 checksum，且僅為支援的 `GGA`、`RMC`、`VTG`、`GSA`、`GSV` 與 `SXT` sentence types 輸出 structured data。
 
 #### Scenario: A supported valid sentence is complete
-- **WHEN** a newline-terminated supported NMEA sentence has a valid checksum and valid field values
-- **THEN** the parser emits a structured dictionary identifying the sentence type and decoded fields
+- **WHEN** 以 newline 結尾、受支援的 NMEA sentence 具有有效 checksum 與有效 field values
+- **THEN** parser 會輸出一個 structured dictionary，識別 sentence type 與 decoded fields
 
 #### Scenario: A sentence is incomplete
-- **WHEN** a parser call ends before the newline terminating an NMEA sentence
-- **THEN** the parser retains the partial sentence and emits no data for it until completion
+- **WHEN** parser call 在 NMEA sentence 的結尾 newline 之前結束
+- **THEN** parser 會保留 partial sentence，且在完成前不為其輸出任何資料
 
 #### Scenario: A sentence has an invalid checksum or unsupported type
-- **WHEN** a complete NMEA sentence fails checksum validation or has a sentence type outside the supported set
-- **THEN** the parser emits no structured data for that sentence and continues accepting later input
+- **WHEN** 完整 NMEA sentence 未通過 checksum validation，或其 sentence type 不在支援集合中
+- **THEN** parser 不會為該 sentence 輸出 structured data，並會繼續接受後續輸入

@@ -2,7 +2,10 @@ import sys
 import time
 import serial
 import click
-from utils import configure_serial
+try:
+    from ..utils import configure_serial
+except ImportError:  # Preserve legacy direct execution.
+    from utils import configure_serial
 
 def send_command_and_wait_for_response(ser, command_str, timeout=0.2, ignore_non_text=False):
     """

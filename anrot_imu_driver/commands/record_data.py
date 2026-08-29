@@ -8,7 +8,10 @@ from typing import Any, List, TextIO, Tuple, Union
 import click
 import serial
 
-from parsers.anrot_serial_parser import AnrotSerialParser, AnrotFrame
+try:
+    from ..parsers.anrot_serial_parser import AnrotSerialParser, AnrotFrame
+except ImportError:  # Preserve legacy direct execution.
+    from parsers.anrot_serial_parser import AnrotSerialParser, AnrotFrame
 
 
 MAX_NODES = 16

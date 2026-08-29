@@ -2,9 +2,14 @@ import sys
 import time
 import serial
 import click
-from utils import clear_screen
-from parsers.anrot_serial_parser import AnrotSerialParser
-from parsers.anrot_nmea_parser import AnrotNmeaParser
+try:
+    from ..utils import clear_screen
+    from ..parsers.anrot_serial_parser import AnrotSerialParser
+    from ..parsers.anrot_nmea_parser import AnrotNmeaParser
+except ImportError:  # Preserve legacy direct execution.
+    from utils import clear_screen
+    from parsers.anrot_serial_parser import AnrotSerialParser
+    from parsers.anrot_nmea_parser import AnrotNmeaParser
 
 
 

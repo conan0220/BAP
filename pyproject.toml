@@ -1,24 +1,58 @@
 [project]
-name = "imu"
+name = "bap"
 version = "0.1.0"
-description = "Add your description here"
+description = "BAP - Boxing Analysis Platform"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "click==8.1.7",
+    "httpx>=0.28,<1",
+    "packaging>=24,<27",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.10,<3",
     "pynmea2==1.19.0",
     "pyserial==3.4",
 ]
+
+[project.optional-dependencies]
+backend = [
+    "alembic>=1.16,<2",
+    "argon2-cffi>=23.1,<26",
+    "fastapi>=0.116,<1",
+    "pyjwt>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn>=0.35,<1",
+]
+desktop = [
+    "keyring>=25.6,<26",
+    "pyside6>=6.9,<7",
+]
+packaging = [
+    "pyinstaller>=6.15,<7",
+]
+
+[project.scripts]
+bap-desktop = "bap_desktop.app:main"
+bap-imu = "anrot_imu_driver.main:cli"
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["anrot_imu_driver*", "bap_backend*", "bap_common*", "bap_desktop*"]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pytest-qt>=4.5,<5",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["anrot_imu_driver"]
+pythonpath = [".", "anrot_imu_driver"]
 addopts = [
     "--strict-config",
     "--strict-markers",

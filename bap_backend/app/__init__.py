@@ -1,0 +1,1 @@
+"""BAP Backend application package."""

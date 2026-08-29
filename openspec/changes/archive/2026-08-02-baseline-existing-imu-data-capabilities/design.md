@@ -1,103 +1,103 @@
-## Context
+## 背景
 
-See `proposal.md` for motivation. The implemented IMU surface spans the command-line entry point, serial-port commands, ANROT binary and NMEA parsers, and the gateway-grouped CSV recorder. The repository currently has no automated tests and no main OpenSpec requirements. Stable HI221 facts and setup procedures exist under `docs/`, but those documents are evidence and guidance rather than product requirements.
+動機請參閱 `proposal.md`。已實作的 IMU 功能涵蓋命令列進入點、序列埠命令、ANROT 二進位與 NMEA parsers，以及依 gateway 分組的 CSV recorder。目前 repository 沒有自動化測試，也沒有主要 OpenSpec requirements。穩定的 HI221 事實與設定程序位於 `docs/` 下，但這些文件屬於證據與指引，而非產品 requirements。
 
-The working tree contains a user change that makes the recording duration default to 10 seconds. This baseline must preserve that change and must not silently substitute the committed branch's indefinite default.
+Working tree 包含一項使用者變更，將記錄時間的預設值設為 10 秒。本基準必須保留該變更，不得在未告知的情況下改用 committed branch 的無限期預設值。
 
-## Goals / Non-Goals
+## 目標／非目標
 
-**Goals:**
+**目標：**
 
-- Establish the smallest set of capability boundaries that accurately describes the existing public IMU behavior.
-- Add deterministic characterization tests for behavior that can be verified without attached hardware.
-- Make every OpenSpec scenario traceable to at least one identifiable test case.
-- Apply structural, executable, and change-level verification before the baseline is archived.
-- Make later proposals identify additions and modifications against an explicit baseline.
-- Keep any mismatch between implementation, documentation, and proposed requirements visible.
+- 建立能準確描述既有公開 IMU 行為的最小能力邊界集合。
+- 為無須連接硬體即可驗證的行為加入具確定性的特性描述測試。
+- 讓每個 OpenSpec Scenario 都可追溯到至少一個可識別的測試案例。
+- 在封存基準前進行結構、可執行性與 change-level 驗證。
+- 讓後續 proposal 能針對明確的基準辨識新增與修改內容。
+- 明確呈現 implementation、documentation 與 proposed requirements 之間的任何不一致。
 
-**Non-Goals:**
+**非目標：**
 
-- Refactor command or parser internals while adding coverage.
-- Turn accidental implementation defects into desired long-term behavior when no user-visible contract depends on them.
-- Verify electrical, wireless, timing, or throughput behavior that requires attached hardware.
-- Establish a global coverage-percentage gate before representative baseline tests exist.
-- Introduce property-based testing in this change.
-- Baseline punch-type recognition or punch-trajectory analysis whose implementations are not present in the tracked repository.
+- 在增加測試涵蓋率時重構 command 或 parser 內部實作。
+- 在沒有使用者可見 contract 依賴的情況下，將意外的 implementation defects 視為期望的長期行為。
+- 驗證需要連接硬體才能進行的電氣、無線、時間或吞吐量行為。
+- 在具有代表性的基準測試存在之前，建立全域 coverage-percentage gate。
+- 在本變更中導入 property-based testing。
+- 為 tracked repository 中尚未實作的拳種辨識或出拳軌跡分析建立基準。
 
-## Decisions
+## 決策
 
-### 1. Separate the baseline into three user-observable capabilities
+### 1. 將基準分為三項使用者可觀察的能力
 
-The baseline uses `imu-device-communication`, `imu-data-parsing`, and `imu-data-recording`. These boundaries follow what operators and downstream code can observe rather than mirroring every Python module.
+本基準使用 `imu-device-communication`、`imu-data-parsing` 與 `imu-data-recording`。這些邊界依循操作人員及 downstream code 可觀察的內容，而非逐一映照每個 Python module。
 
-- Communication covers discovery, live monitoring, and the saved device-command sequence.
-- Parsing covers incremental binary and NMEA decoding independently of serial hardware.
-- Recording covers the multi-port command and its gateway-specific CSV artifacts.
+- Communication 涵蓋探索、即時監控與已儲存的裝置指令序列。
+- Parsing 涵蓋不依賴序列硬體的增量二進位與 NMEA 解碼。
+- Recording 涵蓋多連接埠命令及其 gateway-specific CSV artifacts。
 
-**Alternatives considered:** A single `imu-driver` capability was rejected because later force-data work can modify recording without changing command sending or protocol parsing. Separate capabilities for every command and frame type were rejected as too granular for the current system.
+**考慮過的替代方案：** 單一 `imu-driver` 能力遭到否決，因為後續 force-data 工作可能修改 recording，卻不會變更 command sending 或 protocol parsing。為每個 command 與 frame type 建立獨立能力也遭到否決，因為對目前系統而言粒度過細。
 
-### 2. Treat verified working-tree behavior as the baseline
+### 2. 將經驗證的 working-tree 行為視為基準
 
-Requirements are derived from the current source and executable examples, with vendor references used only to interpret data formats. The uncommitted 10-second recording default is explicitly included because repository guidance requires preserving the user's current change.
+Requirements 源自目前 source 與可執行 examples，vendor references 僅用於解讀 data formats。未 commit 的 10 秒記錄預設值被明確納入，因為 repository 指引要求保留使用者目前的變更。
 
-If characterization reveals that a proposed requirement does not match executable behavior, this baseline change will correct the requirement or narrow its scenario. It will not change runtime behavior to make an aspirational requirement pass. A defect that should be fixed will receive a separate follow-up change.
+若特性描述發現 proposed requirement 與可執行行為不符，本基準變更將修正 requirement 或縮小其 Scenario 範圍，而不會為了讓期望性 requirement 通過而變更 runtime behavior。應修正的 defect 將建立獨立的後續變更。
 
-**Alternatives considered:** Using README text as authoritative was rejected because it omits the recording command and may diverge from code. Using only committed `HEAD` was rejected because it would discard the active user change.
+**考慮過的替代方案：** 不採用 README 文字作為權威依據，因為其中未包含 recording command，且可能與 code 不一致。也不採用僅限 committed `HEAD` 的方式，因為這會捨棄使用者目前的變更。
 
-### 3. Use pytest for deterministic characterization at hardware boundaries
+### 3. 使用 pytest 在硬體邊界進行具確定性的特性描述
 
-`pytest` is the common test runner. Tests use pytest fixtures, parametrization, `tmp_path`, and `monkeypatch`, with `unittest.mock` where explicit fakes are clearer. Fixed ANROT frames, checksummed NMEA sentences, fake serial ports, controlled clocks, and temporary output directories isolate the tests from attached hardware.
+`pytest` 是共用 test runner。測試使用 pytest fixtures、parametrization、`tmp_path` 與 `monkeypatch`，並在明確的 fakes 更清楚時使用 `unittest.mock`。固定的 ANROT frames、含 checksum 的 NMEA sentences、fake serial ports、controlled clocks 與 temporary output directories，使測試不受連接硬體影響。
 
-Test discovery and markers are configured in `pyproject.toml`. At minimum, `hardware`, `slow`, and `dataset` markers distinguish tests that are unsuitable for the fast default suite. The baseline suite remains non-hardware; future hardware-in-the-loop tests must be explicitly marked. `pytest-cov` reports branch coverage as a diagnostic, but this change does not introduce an arbitrary global percentage threshold. Property-based testing can be proposed later if example-based protocol fixtures reveal insufficient input coverage.
+Test discovery 與 markers 在 `pyproject.toml` 中設定。至少以 `hardware`、`slow` 與 `dataset` markers 區分不適合快速預設套件的測試。基準套件維持為非硬體測試；未來的 hardware-in-the-loop tests 必須明確標記。`pytest-cov` 會將 branch coverage 作為診斷資訊回報，但本變更不導入任意的全域百分比門檻。若基於範例的 protocol fixtures 顯示輸入涵蓋不足，日後可再提出 property-based testing。
 
-Tests target observable results: command output and exit behavior, command bytes and ordering, emitted structured measurements, file naming, CSV headers and rows, duration handling, and cleanup. Internal helper layout is not part of the baseline.
+測試以可觀察的結果為目標：command output 與 exit behavior、command bytes 與順序、輸出的 structured measurements、file naming、CSV headers 與 rows、duration handling，以及 cleanup。內部 helper layout 不屬於基準的一部分。
 
-**Alternatives considered:** Hardware-only verification was rejected because it would be slow, non-deterministic, and unavailable in continuous integration. The standard-library `unittest` runner was rejected because pytest provides concise fixture, parametrization, temporary-path, and marker support for the planned test matrix. Snapshotting whole console sessions was rejected because inconsequential formatting changes would create brittle tests.
+**考慮過的替代方案：** 不採用僅限硬體的驗證，因為它速度慢、不具確定性，且無法用於 continuous integration。不採用 standard-library `unittest` runner，因為 pytest 能為規劃的 test matrix 提供簡潔的 fixture、parametrization、temporary-path 與 marker 支援。不採用整段 console session 的 snapshot，因為無關緊要的格式變更會造成脆弱測試。
 
-### 4. Preserve repository-wide scenario-to-test traceability
+### 4. 維護全 repository 適用的 Scenario-to-test traceability
 
-`openspec/config.yaml` defines the repository-wide policy: every current and future Scenario must be testable, must map to a test task, and must have test evidence before archive. This baseline change is the first application of that policy; every `#### Scenario` in its three delta specs maps to at least one test case.
+`openspec/config.yaml` 定義全 repository 適用的政策：每個目前及未來的 Scenario 都必須可測試、對應至 test task，且在封存前具備 test evidence。本基準變更首次套用該政策；三份 delta specs 中的每個 `#### Scenario` 都對應至少一個測試案例。
 
-The exact capability and Scenario names are recorded in the test identifier, docstring, marker metadata, or a maintained traceability audit. A parametrized test may cover multiple examples, but each Scenario must remain individually identifiable in pytest output. One test may support multiple Scenarios only when the audit lists every mapping explicitly.
+確切的 capability 與 Scenario 名稱會記錄在 test identifier、docstring、marker metadata 或持續維護的 traceability audit 中。參數化測試可涵蓋多個 examples，但每個 Scenario 在 pytest 輸出中必須仍可個別識別。只有在 audit 明確列出每個 mapping 時，一個測試才能支援多個 Scenarios。
 
-Scenario coverage is the primary completeness measure; line and branch coverage are supporting diagnostics. A final audit compares all scenario headings with collected pytest cases and treats any unmapped scenario as incomplete work.
+Scenario coverage 是主要完整性指標；line 與 branch coverage 是輔助診斷。最終 audit 會比較所有 scenario headings 與已收集的 pytest cases，並將任何未 mapping 的 scenario 視為工作未完成。
 
-**Alternatives considered:** Relying only on code coverage was rejected because executing a line does not prove a requirement scenario. Requiring one test function per scenario was rejected because parametrization can express protocol variants more clearly while retaining distinct test cases.
+**考慮過的替代方案：** 不採用僅依賴 code coverage 的方式，因為執行一行 code 並不能證明 requirement scenario。不要求每個 scenario 都有一個 test function，因為 parametrization 能在維持不同 test cases 的同時，更清楚地表達 protocol variants。
 
-### 5. Verify the baseline in three layers
+### 5. 以三個層級驗證基準
 
-Before archive, the change is checked at three different layers:
+封存前，會在三個不同層級檢查變更：
 
-1. `openspec validate baseline-existing-imu-data-capabilities --type change --strict` validates artifact structure and requirement syntax.
-2. The focused and complete pytest suites validate executable behavior, with branch coverage reported for review.
-3. OpenSpec change verification checks completeness, correctness, and coherence, including whether every scenario has corresponding test evidence. Use the official verification workflow when available; otherwise perform and record an equivalent review because the current core profile does not install a verification skill.
+1. `openspec validate baseline-existing-imu-data-capabilities --type change --strict` 驗證 artifact structure 與 requirement syntax。
+2. 聚焦及完整的 pytest suites 驗證可執行行為，並回報 branch coverage 以供審查。
+3. OpenSpec change verification 檢查完整性、正確性與一致性，包括每個 scenario 是否都有對應的 test evidence。可用時採用官方 verification workflow；否則執行並記錄等效審查，因為目前的 core profile 未安裝 verification skill。
 
-OpenSpec verification is evidence review rather than a substitute for executing pytest. Any uncovered scenario prevents this project from treating the change as archive-ready even if the tooling reports only a warning.
+OpenSpec verification 是 evidence review，不能取代實際執行 pytest。即使 tooling 僅回報 warning，只要存在任何未涵蓋的 scenario，本專案便不得將變更視為可封存。
 
-**Alternatives considered:** Treating strict validation as sufficient was rejected because it cannot establish runtime correctness. Treating automated test success as sufficient was rejected because it does not by itself detect missing scenario coverage or inconsistency among planning artifacts.
+**考慮過的替代方案：** 不將 strict validation 視為足夠，因為它無法確立 runtime correctness。也不將 automated test success 視為足夠，因為僅憑此結果無法偵測遺漏的 scenario coverage 或 planning artifacts 之間的不一致。
 
-### 6. Do not conceal known gaps through baseline wording
+### 6. 不以基準措辭掩蓋已知缺口
 
-The specs describe supported behavior without claiming that malformed input is diagnosed comprehensively, timestamps are synchronized across gateways, CSV output is research-ready, or the recorder validates data quality. Those are not existing capabilities and belong to later changes.
+Specs 描述支援的行為，但不宣稱會完整診斷 malformed input、在 gateways 之間同步 timestamps、產生 research-ready CSV 輸出，或由 recorder 驗證 data quality。這些都不是既有能力，應歸屬後續變更。
 
-**Alternatives considered:** Describing desired robustness in the baseline was rejected because main specs would then claim behavior the system does not provide.
+**考慮過的替代方案：** 不在基準中描述期望的 robustness，因為這會使 main specs 宣稱系統具備實際上不存在的行為。
 
-## Risks / Trade-offs
+## 風險／取捨
 
-- **[Characterization can freeze incidental behavior]** → Specify stable inputs, outputs, and error boundaries while avoiding private structure and inconsequential formatting.
-- **[Mocks can differ from physical serial devices]** → Keep protocol fixtures byte-accurate and record hardware verification as a separate future activity rather than overstating coverage.
-- **[OpenSpec verification may warn without blocking archive]** → Make zero uncovered scenarios an explicit project archive condition and keep pytest execution separate.
-- **[Coverage metrics can reward low-value tests]** → Review scenario coverage first and use branch coverage only to find unexamined paths.
-- **[Existing examples contain presentation defects]** → Test decoded values and required output fields, not unrelated labels or formatting mistakes; propose fixes separately.
-- **[The user-modified duration default may change before implementation]** → Re-read the working tree before applying this change and reconcile the baseline explicitly if the user has changed it again.
+- **[特性描述可能固化偶發行為]** → 規定穩定的 inputs、outputs 與 error boundaries，同時避免納入 private structure 與無關緊要的格式。
+- **[Mocks 可能與實體序列裝置不同]** → 維持 protocol fixtures 的 byte-accurate 特性，並將硬體驗證記錄為獨立的未來活動，避免誇大 coverage。
+- **[OpenSpec verification 可能只警告而不阻止封存]** → 將未涵蓋 scenario 數量為零訂為明確的專案封存條件，並獨立執行 pytest。
+- **[Coverage metrics 可能鼓勵低價值測試]** → 優先審查 scenario coverage，只以 branch coverage 尋找尚未檢查的 paths。
+- **[既有 examples 包含呈現缺陷]** → 測試 decoded values 與 required output fields，不測試無關的 labels 或 formatting mistakes；另行提出修正。
+- **[使用者修改的 duration 預設值可能在實作前變更]** → 套用本變更前重新讀取 working tree；若使用者再次變更，則明確調整基準。
 
-## Migration Plan
+## 遷移計畫
 
-1. Add and configure the pytest development dependencies, markers, fixtures, and scenario-traceability convention.
-2. Add characterization tests for the three capability specs without editing runtime modules.
-3. Run the focused and complete suites with branch-coverage reporting and compare every failure with the current working-tree behavior.
-4. Narrow or correct baseline requirements when they overstate current behavior; record desired fixes as separate changes.
-5. Run strict OpenSpec validation and the completeness, correctness, and coherence verification review; resolve every uncovered scenario.
-6. Archive the completed change so its three delta specs become authoritative main specs.
+1. 新增並設定 pytest 開發依賴項、markers、fixtures 與 scenario-traceability 慣例。
+2. 為三份 capability specs 新增特性描述測試，且不編輯 runtime modules。
+3. 執行聚焦及完整的套件並回報 branch coverage，再將每項 failure 與目前 working-tree behavior 比較。
+4. 當基準 requirements 誇大目前行為時，縮小其範圍或予以修正；另行記錄期望的修正。
+5. 執行嚴格 OpenSpec validation，以及完整性、正確性與一致性 verification review；解決每個未涵蓋的 scenario。
+6. 封存已完成的變更，使其三份 delta specs 成為權威 main specs。
 
-There is no runtime deployment or rollback. If the baseline is abandoned before archive, remove only its change artifacts and newly added characterization-test configuration and files; existing runtime behavior remains unchanged.
+本變更沒有 runtime deployment 或 rollback。若基準在封存前遭到放棄，僅移除其 change artifacts，以及新加入的特性描述測試設定與檔案；既有 runtime behavior 維持不變。

@@ -1,44 +1,44 @@
 ## Purpose
 
-Define transparent and reproducible quality checks that show whether a recorded punch-force trial is complete and suitable for downstream force-analysis research.
+定義透明且可重現的品質檢查，以顯示已記錄的拳力 trial 是否完整並適合後續 force-analysis 研究。
 
 ## ADDED Requirements
 
-### Requirement: Required-source completeness checks
-The system SHALL verify that a trial contains the force-plate stream and all four assigned IMU streams, and SHALL report missing, empty, prematurely terminated, or unassigned sources.
+### Requirement: 必要來源完整性檢查
+系統 SHALL 驗證 trial 包含 force plate stream 及全部四個已指定的 IMU streams，並 SHALL 回報遺漏、空白、過早終止或未指定的 sources。
 
-#### Scenario: Trial is missing an IMU stream
-- **WHEN** a recorded trial contains fewer than four assigned IMU streams
-- **THEN** the quality report identifies the missing placement and gives the trial a failing disposition
+#### Scenario: Trial 遺漏一個 IMU stream
+- **WHEN** 已記錄的 trial 包含少於四個已指定的 IMU streams
+- **THEN** quality report 會識別遺漏的 placement，並將 trial disposition 設為 `fail`
 
-### Requirement: Per-source measurement integrity checks
-The system SHALL evaluate each source for timestamp regressions, duplicate timestamps, sampling gaps, observed sampling rate, missing or invalid measurement fields, and values at or beyond the configured sensor range.
+### Requirement: 各來源量測完整性檢查
+系統 SHALL 評估每個 source 是否有 timestamp regression、duplicate timestamps、sampling gaps、observed sampling rate、遺漏或無效的 measurement fields，以及達到或超出設定 sensor range 的 values。
 
-#### Scenario: IMU timestamps are duplicated
-- **WHEN** an IMU stream contains repeated source timestamps
-- **THEN** the quality report identifies the affected source and reports the count or intervals of duplicated timestamps
+#### Scenario: IMU timestamps 重複
+- **WHEN** IMU stream 包含重複的 source timestamps
+- **THEN** quality report 會識別受影響的 source，並回報重複 timestamps 的數量或 intervals
 
-#### Scenario: Sensor measurements reach the configured range
-- **WHEN** an IMU or force-plate measurement reaches or exceeds its configured valid range
-- **THEN** the quality report identifies the source, channel, affected interval, and possible saturation
+#### Scenario: 感測器量測達到設定範圍
+- **WHEN** IMU 或 force plate measurement 達到或超過其設定的有效範圍
+- **THEN** quality report 會識別 source、channel、受影響 interval 與可能的 saturation
 
-### Requirement: Traceable quality report
-The system SHALL produce a machine-readable quality report containing a trial disposition of `pass`, `warning`, or `fail`, individual findings with severity and affected source or interval, the applied thresholds, and the quality-check version.
+### Requirement: 可追溯的品質報告
+系統 SHALL 產生 machine-readable quality report，其中包含 `pass`、`warning` 或 `fail` 的 trial disposition、附有 severity 與受影響 source 或 interval 的個別 findings、套用的 thresholds，以及 quality-check version。
 
-#### Scenario: Review trial quality
-- **WHEN** quality validation completes for a trial
-- **THEN** the report explains the trial disposition through its individual findings and records the thresholds and checker version used
+#### Scenario: 審查 trial 品質
+- **WHEN** trial 的 quality validation 完成
+- **THEN** report 會透過個別 findings 說明 trial disposition，並記錄使用的 thresholds 與 checker version
 
-### Requirement: Quality validation does not conceal source defects
-The system SHALL NOT modify raw source data to remove or conceal defects discovered during quality validation. Any cleaned or corrected derivative SHALL remain distinguishable from the raw data and SHALL record the transformation applied.
+### Requirement: 品質驗證不得掩蓋來源缺陷
+系統 SHALL NOT 修改 raw source data 以移除或掩蓋 quality validation 期間發現的 defects。任何經清理或修正的 derivative SHALL 可與 raw data 區分，並 SHALL 記錄套用的 transformation。
 
-#### Scenario: A derivative removes duplicate samples
-- **WHEN** a downstream processing step creates a derivative with duplicate samples removed
-- **THEN** the raw samples remain unchanged and the derivative identifies the transformation and affected samples
+#### Scenario: Derivative 移除重複 samples
+- **WHEN** downstream processing step 建立已移除 duplicate samples 的 derivative
+- **THEN** raw samples 維持不變，且 derivative 會識別 transformation 與受影響的 samples
 
-### Requirement: Alignment quality contributes to trial disposition
-The system SHALL include time-alignment success and diagnostics when determining whether a trial is suitable for alignment-dependent punch-force research.
+### Requirement: 對齊品質納入 trial disposition
+系統 SHALL 在判斷 trial 是否適合需要對齊的拳力研究時，納入 time-alignment success 與 diagnostics。
 
-#### Scenario: Alignment fails acceptance criteria
-- **WHEN** any required source is marked alignment-failed
-- **THEN** the quality report gives the trial a failing disposition for alignment-dependent use and references the alignment diagnostics
+#### Scenario: 對齊未通過 acceptance criteria
+- **WHEN** 任一必要 source 標示為 alignment-failed
+- **THEN** quality report 會將 trial 對 alignment-dependent use 的 disposition 設為 `fail`，並引用 alignment diagnostics
