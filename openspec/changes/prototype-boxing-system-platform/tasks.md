@@ -121,7 +121,7 @@
 - [ ] 10.14 在隔離的 Windows 測試主機執行第一次初始化、部署 Script 更新及後續第二次 Backend 發布的端到端測試，確認初始化 Script 可重複執行、持久資料不被覆蓋，且 Developer 之後只需執行本機發布 Script。
 - [x] 10.15 驗證 `Start-BapBackend.ps1` 可由 Terminal 前景執行同一個 Python entry point供除錯，也可由部署流程建立可在 SSH session 結束後持續運行的背景 process；確認 Windows 重開機後不宣稱會自動啟動。
 - [x] 10.16 驗證 `C:\BAP\bootstrap\Update-BapDeploymentScripts.ps1`、Private Key、`.env`、Database、Log、Token 與 user 資料都不會進入 Backend Artifact 或部署 Script Artifact。
-- [ ] 10.17 驗證 Backend 正確監聽 `0.0.0.0:12345`，並在既有 Caddy 前置條件下通過 `http://127.0.0.1:12345/health`、公開 `/health`、`/openapi.json` 與 `/docs`；本 Change 不修改 DNS、TLS certificate、HTTPS termination 或 Reverse Proxy。
+- [x] 10.17 驗證 Backend 正確監聽 `0.0.0.0:12345`，並在既有 Caddy 前置條件下通過 `http://127.0.0.1:12345/health`、公開 `/health`、`/openapi.json` 與 `/docs`；本 Change 不修改 DNS、TLS certificate、HTTPS termination 或 Reverse Proxy。
 - [x] 10.18 驗證本 Change 不建立 GitHub Actions Tag-triggered production deployment、production environment secrets、部署核准或 concurrency；後續自動部署 Change 必須重用本 Change 的 Build、Artifact、SCP、SSH、遠端部署、Health Check 與 rollback 介面。
 - [x] 10.19 以白話繁體中文更新 repository 根目錄 `README.md`，說明 Initialize、Test、Start／Stop／Status、Deploy、Update Deployment Scripts、Rollback、公開 HTTPS 驗證與 Desktop App build；為主要操作加入 Mermaid pipeline，標示執行電腦、前置條件、完整可複製 PowerShell command、預期結果及常見錯誤，並以 automated documentation test 驗證提到的 Script 與 repository 路徑存在。
 
