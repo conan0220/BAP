@@ -7,7 +7,7 @@ param(
     [string]$UvPath = "C:\Users\user\.local\bin\uv.exe",
     [switch]$SkipDependencyInstallForTesting,
     [switch]$PrepareOnlyForTesting,
-    [switch]$SkipPublicHealthCheck
+    [switch]$SkipBackendStoppedCheckForTesting
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,9 +46,14 @@ try {
     }
     if ($PrepareOnlyForTesting) { Write-Output ("BAP Backend release prepared: " + $ExpectedCommitSha); return }
 
+    if (-not $SkipBackendStoppedCheckForTesting) {
+        $Listener = Get-NetTCPConnection -LocalPort 12345 -State Listen -ErrorAction SilentlyContinue
+        if ($Listener) {
+            throw "Port 12345 is still in use. Stop the foreground BAP Backend with Ctrl+C before deploying."
+        }
+    }
     $OldRelease = Get-BapCurrentTarget -Root $Root
     if ($OldRelease) { Set-Content -LiteralPath (Join-Path $Root "run\previous-release.txt") -Value $OldRelease -Encoding Ascii }
-    if ($OldRelease) { & (Join-Path $PSScriptRoot "Stop-BapBackend.ps1") -Root $Root }
     $Database = Join-Path $Root "data\bap.db"
     $Backup = $null
     if (Test-Path -LiteralPath $Database -PathType Leaf) {
@@ -65,17 +70,15 @@ try {
     $Current = Join-Path $Root "current"
     if (Test-Path -LiteralPath $Current) { Remove-Item -LiteralPath $Current -Force }
     & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $Release | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Unable to switch the current junction." }
-    & (Join-Path $PSScriptRoot "Start-BapBackend.ps1") -Root $Root
-    try {
-        & (Join-Path $PSScriptRoot "Test-BapBackendHealth.ps1") -SkipPublic:$SkipPublicHealthCheck
-    } catch {
+    if ($LASTEXITCODE -ne 0) {
         if ($OldRelease) {
-            & (Join-Path $PSScriptRoot "Rollback-BapBackendRelease.ps1") -Root $Root -PreviousRelease $OldRelease -DatabaseBackup $Backup -SkipPublicHealthCheck:$SkipPublicHealthCheck
+            & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $OldRelease | Out-Null
         }
-        throw "New release failed health checks and rollback was requested."
+        if ($Backup) { Copy-Item -LiteralPath $Backup -Destination $Database -Force }
+        throw "Unable to switch the current junction. The previous release was restored when available."
     }
-    Write-Output ("BAP Backend deployed: " + $ExpectedCommitSha)
+    Write-Output ("BAP Backend release deployed: " + $ExpectedCommitSha)
+    Write-Output "Start the Backend manually in a foreground Terminal, then run Test-BapBackendHealth.ps1."
 } finally {
     Remove-BapTreeWithinRoot -Root (Join-Path $Root "incoming") -Path $Temp
 }

@@ -36,7 +36,7 @@ BAP 目前只有命令列形式的 IMU 操作，還沒有一般 user 可以直�
 - 使用 `C:\BAP\current\` Directory Junction 指向目前運行的 `C:\BAP\releases\<commit-sha>\`；Backend 啟動 Script 只依賴 `current\` 的固定路徑，讓後續部署流程可以切換版本及回復上一版。
 - 將 `.env`、SQLite Database、Log 與備份保存在 Release 之外，避免切換或刪除 Release 時遺失持久資料。
 - 明確區分 Developer 電腦、遠端 Backend Windows Server 與 user 電腦的資料夾、檔案及責任，避免把 source code、Server 持久資料與 user 本機資料混在一起。
-- 提供第一版人工觸發、自動完成的發布流程：Developer 先完成 commit 與 push，再在本機執行 `Publish-BapBackend.ps1`；Script 建立 Artifact，透過 SCP 上傳，並以 `user@140.114.75.84` 的 SSH Public Key 登入方式要求遠端 Script 完成 Migration、`current\` 切換、Backend Python process 重啟、Health Check 與必要的 rollback。
+- 提供第一版人工協作的發布流程：Server 管理者先在前景 Terminal 以 `Ctrl+C` 停止 Backend；Developer 完成 commit 與 push 後，在本機執行 `Publish-BapBackend.ps1`，自動建立 Artifact、透過 SCP 上傳，並以 `user@140.114.75.84` 的 SSH Public Key 登入方式完成 Migration 與 `current\` 切換；最後由 Server 管理者人工以前景 Terminal 啟動並執行 Health Check，失敗時人工 rollback。
 - 提供 `Publish-BapDeploymentScripts.ps1`、固定放在遠端的 `Update-BapDeploymentScripts.ps1` 及 `bap-deployment-scripts-<commit-sha>.zip`，讓部署 Script 本身也能以有版本、可驗證的方式更新。
 - 將既有 Caddy、DNS、TLS certificate、HTTPS termination 與 Reverse Proxy 視為 Server 外部前置條件；本 Change 只確保 Backend 監聽 `0.0.0.0:12345`，並驗證 Desktop App 可透過 `https://imuapp.lab2312.cs.nthu.edu.tw/api/` 呼叫 API。
 - 發布 Script 必須從已 commit 的乾淨 Git 快照建立 Artifact；Backend 相關檔案尚未 commit、Artifact SHA 與 manifest 不一致，或正式部署的 commit 尚未 push 時，必須停止部署。
@@ -84,7 +84,7 @@ flowchart LR
 - 新增 `bap_desktop/`、`bap_backend/`、Qt-independent 本機 IMU 探索服務與 Windows 包裝設定。
 - 重整可重用的序列埠讀取能力，讓 CLI 與 GUI 不需要各自複製阻塞式讀取邏輯。
 - 新增分層的 Python 遠端 API、帳號 Database、Token 管理、Migration、設定載入及 Desktop App API client。
-- 遠端 Windows Server 新增 `C:\BAP` 執行目錄、`current\` Junction、Release、外部設定、Database、Log、PID 與備份介面，供手動部署及後續自動部署 Change 共用。
+- 遠端 Windows Server 新增 `C:\BAP` 執行目錄、`current\` Junction、Release、外部設定、Database、Log 與備份介面，供手動部署及後續自動部署 Change 共用。Prototype 的 Backend 由 Server 管理者在前景 Terminal 人工啟動；部署 Script 不宣稱能透過 SSH 留下持續運行的背景 process。
 - Repository 新增 `deployment/windows/backend/`，保存 Windows Server 初始化、Artifact build、本機發布、遠端部署、Health Check 與 rollback Scripts；遠端只保存執行部署需要的 Scripts 副本，source of truth 仍在 Git repository。
 - Repository 根目錄的 `README.md` 以白話說明 Developer 如何 Initialize、Test、啟動、停止、查看狀態、Deploy、更新部署 Scripts、Rollback 與驗證公開 HTTPS，並用 Mermaid 畫出各操作會執行的 pipeline。
 - user 電腦使用 BAP 安裝目錄與獨立 App data 目錄；Refresh Token 放在作業系統 Credential Manager，IMU 暫存 CSV 在 App 關閉時刪除，匯出檔案保存到 user 自己選擇的位置。

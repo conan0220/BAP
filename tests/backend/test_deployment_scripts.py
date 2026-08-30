@@ -79,15 +79,18 @@ def test_initialize_requires_uv_without_fixed_global_python() -> None:
     assert "Python 3.12 is required" not in initialize
 
 
-def test_process_scripts_use_pid_and_verify_command_before_stopping() -> None:
+def test_process_scripts_use_foreground_terminal_and_health_status() -> None:
     start = (SCRIPTS / "Start-BapBackend.ps1").read_text(encoding="utf-8")
     stop = (SCRIPTS / "Stop-BapBackend.ps1").read_text(encoding="utf-8")
-    assert "bap-backend.pid" in start and "bap-backend.pid" in stop
-    assert "-WindowStyle Hidden" in start
+    status = (SCRIPTS / "Get-BapBackendStatus.ps1").read_text(encoding="utf-8")
+    assert "Start-Process" not in start
+    assert "bap-backend.pid" not in start
     assert "$Foreground" in start
-    assert "ExecutablePath" in stop
-    assert "bap_backend.app.main" in stop
-    assert "Get-Process -Name python" not in stop
+    assert "& $Python @Arguments" in start
+    assert "Ctrl+C" in start and "Ctrl+C" in stop
+    assert "Stop-Process" not in stop
+    assert "Invoke-WebRequest" in status
+    assert "commit_sha" in status
 
 
 def test_build_uses_clean_git_archive_and_excludes_tests_from_stage() -> None:
@@ -234,13 +237,16 @@ def test_publish_interfaces_require_clean_pushed_git_and_key_only_ssh() -> None:
 def test_deploy_and_rollback_define_safe_sequence_and_database_restore() -> None:
     deploy = (SCRIPTS / "Deploy-BapBackendRelease.ps1").read_text(encoding="utf-8")
     rollback = (SCRIPTS / "Rollback-BapBackendRelease.ps1").read_text(encoding="utf-8")
-    assert deploy.index("Stop-BapBackend.ps1") < deploy.index("Copy-Item -LiteralPath $Database")
+    assert deploy.index("Get-NetTCPConnection") < deploy.index("Copy-Item -LiteralPath $Database")
     assert deploy.index("Copy-Item -LiteralPath $Database") < deploy.index("-m alembic")
     assert deploy.index("-m alembic") < deploy.index("mklink /J")
-    assert deploy.index("mklink /J") < deploy.index("Start-BapBackend.ps1")
-    assert "Rollback-BapBackendRelease.ps1" in deploy
+    assert "Start-BapBackend.ps1" not in deploy
+    assert "Test-BapBackendHealth.ps1" in deploy
+    assert "foreground Terminal" in deploy
     assert "Copy-Item -LiteralPath $DatabaseBackup" in rollback
     assert "Assert-BapReleasePath" in rollback
+    assert "Start-BapBackend.ps1" not in rollback
+    assert "foreground Terminal" in rollback
 
 
 def test_rollback_switches_current_to_previous_release_and_restores_database(tmp_path) -> None:
@@ -275,7 +281,7 @@ def test_rollback_switches_current_to_previous_release_and_restores_database(tmp
             previous,
             "-DatabaseBackup",
             backup,
-            "-SkipRestartForTesting",
+            "-SkipBackendStoppedCheckForTesting",
         ],
         check=True,
         capture_output=True,

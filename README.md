@@ -11,7 +11,7 @@
 | Backend Artifact | 從已 commit 的 Git 快照建立，檔名為 `bap-backend-<commit-sha>.zip` 的部署檔。 |
 | Deployment Scripts Artifact | 只包含遠端部署 Scripts 的版本化 ZIP，不包含 Backend source code 或 Secret。 |
 | `current\` | 遠端 `C:\BAP\current` Junction，指向目前運行的 Backend Release。 |
-| Deploy | Developer 執行一個本機 Script，之後由 Script 自動 Build、SCP、SSH、Migration、切換與 Health Check。 |
+| Deploy | Server 管理者先停止前景 Backend；Developer 執行本機 Script 自動完成 Build、SCP、SSH、Migration 與 `current\` 切換；管理者再人工啟動並檢查。 |
 | Rollback | 新版本失敗時，將 `current\` 指回上一版，必要時還原 SQLite 備份。 |
 | Public API | Desktop App 使用的公開網址：`https://imuapp.lab2312.cs.nthu.edu.tw/api/`。 |
 
@@ -94,6 +94,7 @@ flowchart LR
     DIRS --> ENV[管理者建立 config\.env]
     ENV --> SCRIPTS[發布 Deployment Scripts]
     SCRIPTS --> FIRST[首次 Deploy Backend]
+    FIRST --> START[管理者以前景 Terminal 啟動]
 ```
 
 ### 3.1 從 Developer 電腦確認免密 SSH
@@ -148,7 +149,21 @@ flowchart LR
 
 ## 5. Deploy Backend
 
-部署 Script **不會替 Developer commit**。先完成：
+Prototype 的 Backend 在前景 Terminal 執行，所以部署需要 Server 管理者與 Developer 協作。部署 Script **不會替 Developer commit，也不會透過 SSH 留下背景 process**。
+
+### 5.1 Server 管理者先停止前景 Backend
+
+回到目前執行 Backend 的遠端 Terminal，按下：
+
+```text
+Ctrl+C
+```
+
+確認 Backend 已停止後，再通知 Developer 發布。若 port `12345` 仍在使用，遠端 Deploy Script 會拒絕切換 Release。
+
+### 5.2 Developer 發布 Release
+
+Developer 先完成：
 
 ```powershell
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "C:\Program Files\Git\cmd\git.exe -C D:\repos\BAP status"
@@ -166,38 +181,37 @@ C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionP
 
 ```mermaid
 flowchart TD
-    A[確認 Backend 輸入已 commit 且 HEAD 已 push] --> B[從乾淨 Git 快照跑 Backend tests]
+    S[Server 管理者在前景 Terminal 按 Ctrl+C] --> A[確認 Backend 輸入已 commit 且 HEAD 已 push]
+    A --> B[從乾淨 Git 快照跑 Backend tests]
     B --> C[建立 Backend ZIP + manifest + SHA-256]
     C --> D[SCP 到 C:\BAP\incoming]
     D --> E[SSH 呼叫遠端 Deploy]
     E --> F[建立不可覆寫 Release 與 .venv]
-    F --> G[停止舊 process]
-    G --> H[備份 SQLite]
+    F --> G{port 12345 是否已停止？}
+    G -- 否 --> X[停止並提示管理者按 Ctrl+C]
+    G -- 是 --> H[備份 SQLite]
     H --> I[Alembic migration]
     I --> J[切換 current]
-    J --> K[啟動 Backend]
-    K --> L[本機與公開 Health Check]
-    L -->|失敗| M[Rollback]
+    J --> K[回報 Release 已部署]
+    K --> L[管理者以前景 Terminal 人工啟動]
+    L --> M[本機與公開 Health Check]
+    M -->|失敗| N[管理者停止後人工 Rollback]
 ```
 
-**預期結果：** 遠端 `current\` 指向新 commit，Backend 監聽 `0.0.0.0:12345`，本機與公開 `/health` 都成功。  
-**常見錯誤：** Backend 相關檔案未 commit、commit 未 push、SSH Key 或 Host Fingerprint 不正確、Artifact checksum／manifest 不一致、Migration 或 Health Check 失敗。失敗時先閱讀 Developer terminal 與 `C:\BAP\logs`；不要直接覆寫 `current\` 裡的 source code。
+**預期結果：** 遠端 `current\` 指向新 commit，Terminal 顯示需要管理者人工啟動與檢查。此時 Backend 尚未執行，公開網址暫時回傳 `502` 是預期行為。
+**常見錯誤：** Backend 尚未用 `Ctrl+C` 停止、相關檔案未 commit、commit 未 push、SSH Key 或 Host Fingerprint 不正確、Artifact checksum／manifest 不一致或 Migration 失敗。失敗時先閱讀 Developer terminal；不要直接覆寫 `current\` 裡的 source code。
 
 ## 6. Start、Stop、Status
 
 以下指令在**遠端 Backend Terminal**執行。
 
-### 背景啟動
-
-```powershell
-C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\BAP\scripts\Start-BapBackend.ps1"
-```
-
-### 前景啟動，供除錯
+### 前景啟動
 
 ```powershell
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\BAP\scripts\Start-BapBackend.ps1" -Foreground
 ```
+
+Terminal 必須保持開啟。Prototype 不建立 Windows Service，也不使用 SSH 背景 process；Terminal 關閉或 Windows 重新開機後，Backend 都需要人工重新啟動。
 
 ### 查看狀態
 
@@ -207,21 +221,23 @@ C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionP
 
 ### 停止
 
-```powershell
-C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\BAP\scripts\Stop-BapBackend.ps1"
+回到執行 Backend 的前景 Terminal，按下：
+
+```text
+Ctrl+C
 ```
 
-`Stop-BapBackend.ps1` 只會停止 PID file 指向且 command line 符合 BAP 的 Python process，不會停止電腦上所有 Python。Prototype 尚未建立 Windows Service，所以 Windows 重開機後要人工執行 Start。
+`Stop-BapBackend.ps1` 只會顯示這項操作提示，不會依 process name 終止 Python，避免誤殺電腦上的其他程式。
 
 ## 7. Rollback
 
-Deploy 的新版本 Health Check 失敗時會自動要求 rollback。若管理者需要人工切回指定上一版，在遠端執行：
+新版本人工啟動後若 Health Check 失敗，先回到前景 Terminal 按 `Ctrl+C`。確認 port `12345` 已停止後，在遠端執行：
 
 ```powershell
 C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\BAP\scripts\Rollback-BapBackendRelease.ps1" -PreviousRelease "C:\BAP\releases\<previous-commit-sha>" -DatabaseBackup "C:\BAP\backups\<backup-file>.db"
 ```
 
-**預期結果：** 停止失敗版本、`current\` 指回上一版、必要時還原 Database、重新啟動並通過 Health Check。  
+**預期結果：** `current\` 指回上一版，必要時還原 Database。Rollback Script 不會啟動 Backend；完成後由管理者以前景 Terminal 人工啟動，再執行 Health Check。
 **常見錯誤：** 指定路徑不在 `C:\BAP\releases` 或 `C:\BAP\backups` 時，Script 會拒絕操作。
 
 ## 8. 驗證本機與公開 HTTPS

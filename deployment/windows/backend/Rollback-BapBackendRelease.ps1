@@ -3,8 +3,7 @@ param(
     [string]$Root = "C:\BAP",
     [string]$PreviousRelease,
     [string]$DatabaseBackup,
-    [switch]$SkipRestartForTesting,
-    [switch]$SkipPublicHealthCheck
+    [switch]$SkipBackendStoppedCheckForTesting
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +15,12 @@ if (-not $PreviousRelease) {
 }
 $PreviousRelease = Assert-BapReleasePath -Root $Root -ReleasePath $PreviousRelease
 if (-not (Test-Path -LiteralPath $PreviousRelease -PathType Container)) { throw "Previous release does not exist." }
-& (Join-Path $PSScriptRoot "Stop-BapBackend.ps1") -Root $Root
+if (-not $SkipBackendStoppedCheckForTesting) {
+    $Listener = Get-NetTCPConnection -LocalPort 12345 -State Listen -ErrorAction SilentlyContinue
+    if ($Listener) {
+        throw "Port 12345 is still in use. Stop the foreground BAP Backend with Ctrl+C before rollback."
+    }
+}
 $Current = Join-Path $Root "current"
 if (Test-Path -LiteralPath $Current) {
     $Item = Get-Item -LiteralPath $Current -Force
@@ -35,8 +39,5 @@ if ($DatabaseBackup) {
         Copy-Item -LiteralPath $DatabaseBackup -Destination (Join-Path $Root "data\bap.db") -Force
     }
 }
-if (-not $SkipRestartForTesting) {
-    & (Join-Path $PSScriptRoot "Start-BapBackend.ps1") -Root $Root
-    & (Join-Path $PSScriptRoot "Test-BapBackendHealth.ps1") -SkipPublic:$SkipPublicHealthCheck
-}
 Write-Output "BAP Backend rollback completed."
+Write-Output "Start the Backend manually in a foreground Terminal, then run Test-BapBackendHealth.ps1."

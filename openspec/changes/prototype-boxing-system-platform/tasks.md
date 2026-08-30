@@ -14,7 +14,7 @@
 | 發布 Script | Developer 在本機執行的 `Publish-BapBackend.ps1`，負責檢查 Git、打包、上傳及要求遠端部署。 |
 | 乾淨 Git 快照 | 能以 commit SHA 從 Git 重新取得，且 Backend Artifact 輸入沒有未提交內容的檔案集合。 |
 | Backend Python process | 由一般 Python command 啟動、不是 Windows Service 的 FastAPI Backend process。 |
-| PID file | `C:\BAP\run\bap-backend.pid`，供部署 Scripts 確認及管理 Backend process。 |
+| 前景 Backend Terminal | Server 管理者人工啟動 Backend 的 Terminal；Terminal 必須保持開啟，並以 `Ctrl+C` 停止 Backend。 |
 | 部署 Script Artifact | 檔名為 `bap-deployment-scripts-<commit-sha>.zip`、用來更新遠端部署 Scripts 的壓縮檔。 |
 
 ## 1. 專案結構與相依套件
@@ -109,17 +109,17 @@
 - [x] 10.2 建立 `Build-BapBackendArtifact.ps1`：取得完整 `HEAD` SHA、從該 commit 建立乾淨暫存工作區、執行 Backend tests，並產生 `bap-backend-<commit-sha>.zip`、manifest 與 `.zip.sha256`。
 - [x] 10.3 將 Backend production dependencies 與 Desktop／Build dependencies 分開，讓遠端依 `pyproject.toml`、`uv.lock` 只安裝 Backend 必要套件；加入 Artifact contents tests，確認不包含 `.venv`、`.env`、Database、Log、Token、Secret、Desktop App 或測試資料。
 - [x] 10.4 建立可安全重複執行的 `Initialize-BapBackendHost.ps1`，驗證 Python 3.12、uv、既有 `user` 帳號、OpenSSH、Public Key 登入與 ACL，建立 `C:\BAP` 的 `releases`、`incoming`、`config`、`data`、`logs`、`backups`、`scripts`、`scripts-releases`、`bootstrap`、`run`，且不得建立新帳號、覆寫 SSH 設定或刪除既有持久資料。
-- [x] 10.5 建立 `Start-BapBackend.ps1`、`Stop-BapBackend.ps1` 與 `Get-BapBackendStatus.ps1`，使用 `C:\BAP\current\.venv\Scripts\python.exe` 啟動普通 Backend Python process，以 `C:\BAP\run\bap-backend.pid` 管理狀態，並確認停止操作不會誤殺其他 Python process。
+- [x] 10.5 建立 `Start-BapBackend.ps1`、`Stop-BapBackend.ps1` 與 `Get-BapBackendStatus.ps1`；使用 `C:\BAP\current\.venv\Scripts\python.exe` 在前景 Terminal 啟動 Backend，以 `Ctrl+C` 停止，並透過本機 `/health` 查看狀態，不使用可能誤指向 Python launcher 的 PID file。
 - [x] 10.6 建立 `Deploy-BapBackendRelease.ps1`，驗證 `.sha256`、ZIP 檔名 SHA 與 manifest SHA，解壓縮到不可覆寫的 `C:\BAP\releases\<commit-sha>`，建立 `.venv` 並鎖定安裝 Backend production dependencies。
 - [x] 10.7 在遠端部署 Script 中建立安全的 `current\` Junction 管理，能讀取舊目標、在 Backend Python process 停止後切換到指定 Release，且拒絕指向 `C:\BAP\releases` 以外的位置。
 - [x] 10.8 建立 `Publish-BapBackend.ps1`，檢查所有 Artifact 輸入都已 commit、沒有未追蹤內容，且正式部署的 `HEAD` 已 push；預設使用 SSH host `140.114.75.84`、user `user`、port `22`、`BatchMode=yes` 與已固定的 SSH Host Fingerprint，通過後呼叫 Build Script、以 SCP 上傳 ZIP 與 checksum，再以 SSH 呼叫遠端 Deploy Script。
 - [x] 10.9 對 `Publish-BapBackend.ps1` 建立 tests，確認 dirty Backend files、舊 SHA 包含新 working-tree 內容、未 push commit、Checksum 不符及 manifest 不符都會在修改遠端前停止；只有無關 Desktop dirty files 時顯示警告。
 - [x] 10.10 建立 `Publish-BapDeploymentScripts.ps1`，從已 commit 且已 push 的 Git 快照產生 `bap-deployment-scripts-<commit-sha>.zip`、manifest 與 SHA-256，以 SCP 上傳後透過 SSH 呼叫固定的 `C:\BAP\bootstrap\Update-BapDeploymentScripts.ps1`。
 - [x] 10.11 建立最小且穩定的 `Update-BapDeploymentScripts.ps1`，驗證 checksum、commit SHA 與允許的檔案，解壓縮到 `C:\BAP\scripts-releases\<commit-sha>`，安全切換 `C:\BAP\scripts`，失敗時保留舊版，且不得在執行途中覆寫自己。
-- [x] 10.12 完成遠端 Backend 部署順序：準備 Release、停止 Backend Python process、備份 SQLite、執行 Alembic migration、記錄舊 `current\`、切換、啟動新 process，最後由 `Test-BapBackendHealth.ps1` 檢查 Server 本機與公開 `/health`。
-- [x] 10.13 建立 `Rollback-BapBackendRelease.ps1` 與 rollback tests，模擬新版本 Health Check 失敗，確認停止新 process、`current\` 指回上一個 Release、必要時還原停止 process 後建立的 Database 備份，並讓上一版重新通過 `/health`。
-- [ ] 10.14 在隔離的 Windows 測試主機執行第一次初始化、部署 Script 更新及後續第二次 Backend 發布的端到端測試，確認初始化 Script 可重複執行、持久資料不被覆蓋，且 Developer 之後只需執行本機發布 Script。
-- [x] 10.15 驗證 `Start-BapBackend.ps1` 可由 Terminal 前景執行同一個 Python entry point供除錯，也可由部署流程建立可在 SSH session 結束後持續運行的背景 process；確認 Windows 重開機後不宣稱會自動啟動。
+- [x] 10.12 完成 Prototype 遠端 Backend 部署順序：Server 管理者先以 `Ctrl+C` 停止前景 Backend，發布 Script 再準備 Release、確認 port `12345` 未被使用、備份 SQLite、執行 Alembic migration、記錄舊 `current\` 並切換；完成後由管理者人工以前景 Terminal 啟動，再以 `Test-BapBackendHealth.ps1` 檢查 Server 本機與公開 `/health`。
+- [x] 10.13 建立 `Rollback-BapBackendRelease.ps1` 與 rollback tests，確認 rollback 前要求前景 Backend 已停止、`current\` 指回上一個 Release、必要時還原 Database 備份；完成後由管理者人工啟動上一版並檢查 `/health`。
+- [ ] 10.14 在隔離的 Windows 測試主機執行第一次初始化、部署 Script 更新及後續第二次 Backend 發布的端到端測試，確認初始化 Script 可重複執行、持久資料不被覆蓋、Server 管理者可在部署前後人工停止與啟動前景 Backend，且 Developer 的 Build、SCP、SSH、Migration 與 `current\` 切換只需執行本機發布 Script。
+- [x] 10.15 以實際 Windows SSH 部署驗證背景 child process 會在 session 結束後失效，因此 Prototype 明確只支援 Terminal 前景啟動；確認 Terminal 關閉或 Windows 重新開機後不宣稱 Backend 會持續運行或自動啟動。
 - [x] 10.16 驗證 `C:\BAP\bootstrap\Update-BapDeploymentScripts.ps1`、Private Key、`.env`、Database、Log、Token 與 user 資料都不會進入 Backend Artifact 或部署 Script Artifact。
 - [x] 10.17 驗證 Backend 正確監聽 `0.0.0.0:12345`，並在既有 Caddy 前置條件下通過 `http://127.0.0.1:12345/health`、公開 `/health`、`/openapi.json` 與 `/docs`；本 Change 不修改 DNS、TLS certificate、HTTPS termination 或 Reverse Proxy。
 - [x] 10.18 驗證本 Change 不建立 GitHub Actions Tag-triggered production deployment、production environment secrets、部署核准或 concurrency；後續自動部署 Change 必須重用本 Change 的 Build、Artifact、SCP、SSH、遠端部署、Health Check 與 rollback 介面。

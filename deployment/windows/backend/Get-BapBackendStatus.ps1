@@ -1,19 +1,24 @@
 [CmdletBinding()]
-param([string]$Root = "C:\BAP", [switch]$AsJson)
+param(
+    [string]$Root = "C:\BAP",
+    [string]$LocalUrl = "http://127.0.0.1:12345/health",
+    [switch]$AsJson
+)
 
 $ErrorActionPreference = "Stop"
-$PidFile = Join-Path $Root "run\bap-backend.pid"
 $State = "stopped"
-$ProcessId = $null
-if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
-    $Text = (Get-Content -LiteralPath $PidFile -Raw).Trim()
-    if ($Text -match "^\d+$") {
-        $ProcessId = [int]$Text
-        $Process = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $ProcessId) -ErrorAction SilentlyContinue
-        if ($Process -and $Process.CommandLine -like "*bap_backend.app.main*") { $State = "running" }
-        else { $State = "stale_pid" }
-    } else { $State = "stale_pid" }
+$CommitSha = $null
+try {
+    $Response = Invoke-WebRequest -Uri $LocalUrl -UseBasicParsing -TimeoutSec 5
+    $Payload = $Response.Content | ConvertFrom-Json
+    if ($Response.StatusCode -eq 200 -and $Payload.status -eq "ok" -and $Payload.service -eq "bap-backend") {
+        $State = "running"
+        $CommitSha = $Payload.commit_sha
+    } else {
+        $State = "unexpected_response"
+    }
+} catch {
+    $State = "stopped"
 }
-$Result = [ordered]@{ state = $State; pid = $ProcessId }
-if ($AsJson) { $Result | ConvertTo-Json -Compress } else { Write-Output ("BAP Backend: " + $State + $(if ($ProcessId) { " (PID $ProcessId)" } else { "" })) }
-
+$Result = [ordered]@{ state = $State; commit_sha = $CommitSha }
+if ($AsJson) { $Result | ConvertTo-Json -Compress } else { Write-Output ("BAP Backend: " + $State + $(if ($CommitSha) { " ($CommitSha)" } else { "" })) }

@@ -20,7 +20,7 @@
 | 乾淨 Git 快照 | 沒有 Backend 相關未提交內容，且能以 commit SHA 從 Git 重新取得的完整檔案集合。 |
 | Checksum | 與 Backend ZIP 放在一起的 `.sha256` 檔案，用來確認傳輸後的 ZIP 內容沒有改變。 |
 | Backend Python process | 使用一般 Python command 啟動的 FastAPI process；Prototype 不註冊 Windows Service。 |
-| PID file | `C:\BAP\run\bap-backend.pid`，記錄由部署 Script 管理的 Backend process id。 |
+| 前景 Backend Terminal | Server 管理者人工啟動 Backend 的 Terminal；Terminal 保持開啟時 Backend 才持續運行，並以 `Ctrl+C` 停止。 |
 | 部署 Script Artifact | 檔名為 `bap-deployment-scripts-<commit-sha>.zip`，只包含可在遠端執行的部署 Scripts、版本資訊與 manifest。 |
 
 ## Context
@@ -55,7 +55,7 @@
 - 不自動安裝 App 更新。
 - 不建立 Windows Service，也不保證 Windows Server 重新開機後自動啟動 Backend。
 - 不修改既有 Caddy、DNS、TLS certificate、HTTPS termination 或 Reverse Proxy 設定。
-- 不在本變更建立 GitHub Actions 到 Windows Server 的無人值守部署流程，包括 Tag 觸發、production environment secrets、部署核准與 concurrency；第一版仍提供由 Developer 人工啟動、之後自動完成 SCP、SSH、`current\` 切換及失敗 rollback 的本機發布流程。
+- 不在本變更建立 GitHub Actions 到 Windows Server 的無人值守部署流程，包括 Tag 觸發、production environment secrets、部署核准與 concurrency；第一版由 Server 管理者在部署前後人工停止與啟動前景 Backend，Developer 本機發布 Script 自動完成 Build、SCP、SSH、Migration 與 `current\` 切換。
 - 不修改 vendor material。
 
 ## 系統架構
@@ -230,10 +230,10 @@ C:\BAP\
 ├─ bootstrap\
 │  └─ Update-BapDeploymentScripts.ps1 # 固定入口，不由自己覆寫
 └─ run\
-   └─ bap-backend.pid                # Backend 未執行時可不存在
+   └─ previous-release.txt           # 記錄 rollback 可使用的上一版路徑
 ```
 
-`current\` 本身不保存另一份程式碼，只指向 `releases\<commit-sha>`。`.env`、`bap.db`、Log、PID 與備份都放在 Release 外，因此切換或移除 Release 不會刪除持久資料。Prototype 不建立 Windows Service；Backend 由普通 Python process 執行，部署 Scripts 透過 PID file 管理該 process。
+`current\` 本身不保存另一份程式碼，只指向 `releases\<commit-sha>`。`.env`、`bap.db`、Log 與備份都放在 Release 外，因此切換或移除 Release 不會刪除持久資料。Prototype 不建立 Windows Service；Backend 由 Server 管理者在前景 Terminal 執行，部署 Script 不嘗試透過 SSH 留下背景 child process。
 
 ### user 電腦：Desktop App 與本機資料
 
@@ -505,24 +505,25 @@ C:\BAP\
 ├─ scripts\                         # 人工與後續自動部署共用入口
 ├─ scripts-releases\                # 有版本的部署 Script 內容
 ├─ bootstrap\                       # 固定的 Script 更新入口
-└─ run\                             # PID 等短期執行狀態
+└─ run\                             # previous-release 等短期部署狀態
 ```
 
 準備 Release 時在 `releases\<commit-sha>\.venv` 執行鎖定相依套件安裝。`current\`、`config\`、`data\`、`logs\` 與 `backups\` 不得包在彼此裡面，切換 Release 也不得搬移或覆蓋持久資料。
 
 **替代方案：** 直接把 ZIP 解壓縮覆蓋正在執行的目錄較簡單，但可能留下舊檔、鎖住執行中的檔案，也無法可靠 rollback，因此不採用。
 
-### 15. Backend 使用普通 Python process 與固定啟動入口
+### 15. Backend 使用前景 Terminal 與固定啟動入口
 
-Prototype 不建立 Windows Service。Backend 使用 `C:\BAP\current\.venv\Scripts\python.exe` 執行固定的 Backend entry point，並從外部設定取得 bind host、port、Database 與 Log 位置。首次啟動或除錯時，管理者可以在 Terminal 前景執行相同的 Python command；由部署流程啟動時，`Start-BapBackend.ps1` 會以背景 Python process 執行並將 PID 寫入 `C:\BAP\run\bap-backend.pid`。兩種方式都不得寫死某個 commit SHA。
+Prototype 不建立 Windows Service。Backend 使用 `C:\BAP\current\.venv\Scripts\python.exe` 執行固定 entry point，並從外部設定取得 bind host、port、Database 與 Log 位置。`Start-BapBackend.ps1` 一律在目前 Terminal 前景執行；管理者必須保持 Terminal 開啟，並以 `Ctrl+C` 停止。Script 不使用 `Start-Process` 建立 SSH 背景 child process，也不保存可能只指向 Python launcher、而非實際 Uvicorn process 的 PID file。
 
-`Stop-BapBackend.ps1` 只可停止 PID file 指向、且經檢查確實由 `C:\BAP\current` 啟動的 Backend process；不得依 process name 一次停止電腦上的所有 Python。`Get-BapBackendStatus.ps1` 必須能區分「執行中」、「PID file 過期」與「未執行」。Windows Server 重新開機後不保證自動啟動 Backend，管理者需執行 `Start-BapBackend.ps1`。
+`Stop-BapBackend.ps1` 只說明回到前景 Terminal 按下 `Ctrl+C`，不得依 process name 停止電腦上的所有 Python。`Get-BapBackendStatus.ps1` 透過 Server 本機 `/health` 判斷是否執行中並顯示 commit SHA。Terminal 關閉或 Windows Server 重新開機後 Backend 都會停止，管理者需再次執行 `Start-BapBackend.ps1 -Foreground`。
 
 Backend 提供 `GET /health` 作為部署檢查介面。當 application 已啟動且能存取 Database 時回傳 HTTP `200`，內容包含 `status`、service 名稱及目前 commit SHA；尚未就緒或 Database 無法使用時回傳 HTTP `503`。回應不得包含路徑中的 Secret、Token、連線密碼或完整 exception。
 
 ```mermaid
 flowchart LR
-    START[Start-BapBackend.ps1] --> PROCESS[Backend Python process]
+    ADMIN[Server 管理者] --> START[前景 Terminal<br/>Start-BapBackend.ps1 -Foreground]
+    START --> PROCESS[Backend Python process]
     PROCESS --> CURRENT[C:\BAP\current]
     CURRENT -. Junction .-> RELEASE[C:\BAP\releases\commit-sha]
     RELEASE --> ENTRY[bap_backend.app.main:app]
@@ -531,7 +532,7 @@ flowchart LR
     CHECK[Health Check] -->|GET /health| ENTRY
 ```
 
-**替代方案：** Windows Service 能在開機後自動恢復，但會增加 Service wrapper、安裝與權限管理工作；Prototype 先使用普通 Python process，日後再另立 Change 評估正式服務管理方式。
+**替代方案：** Windows Service 或 Scheduled Task 能讓 process 脫離 SSH session 並在開機後恢復，但會增加 Service wrapper、帳號、權限與生命週期管理工作；Prototype 先使用前景 Terminal，日後再另立 Change 評估正式服務管理方式。
 
 ### 16. Migration、切換與 rollback 共用相同部署順序
 
@@ -542,23 +543,26 @@ flowchart TD
     A[驗證 Artifact 與 manifest] --> B[解壓縮到新的 Release]
     B --> C[建立 .venv 並鎖定安裝 dependencies]
     C --> D[執行 Backend smoke test]
-    D --> E[以 Stop-BapBackend.ps1 停止舊 process]
-    E --> F[備份 C:\BAP\data\bap.db]
+    D --> E{port 12345 是否已停止監聽？}
+    E -- 否 --> STOP[請 Server 管理者回到前景 Terminal 按 Ctrl+C]
+    STOP --> E
+    E -- 是 --> F[備份 C:\BAP\data\bap.db]
     F --> G[以新 Release 執行 Alembic upgrade]
     G --> H[記錄 current 舊目標]
     H --> I[current 改指向新 Release]
-    I --> J[以 Start-BapBackend.ps1 啟動新 process]
-    J --> K{GET /health 成功？}
-    K -- 是 --> L[部署完成並保留上一個 Release]
-    K -- 否 --> M[停止新 process]
-    M --> N[current 指回上一個 Release]
-    N --> O[必要時還原 Database 備份]
-    O --> P[重新啟動並再次檢查]
+    I --> J[部署 Script 完成並保留上一個 Release]
+    J --> K[Server 管理者以前景 Terminal 人工啟動]
+    K --> L{本機與公開 GET /health 成功？}
+    L -- 是 --> M[部署驗證完成]
+    L -- 否 --> N[管理者按 Ctrl+C 停止]
+    N --> O[人工執行 Rollback Script]
+    O --> P[必要時還原 Database 備份]
+    P --> Q[人工啟動上一版並再次檢查]
 ```
 
-在停止 Backend process 前可完成解壓縮、dependency 安裝及不接觸正式 Database 的 smoke test，以縮短中斷時間。SQLite 備份必須在 Backend process 停止後建立，避免複製到寫入中的檔案。切換 `current\` 前要記錄舊目標；新版本健康檢查失敗時先切回舊 Release，若新 migration 與舊程式不相容，再還原剛才的 Database 備份。
+在管理者停止前景 Backend 前可完成解壓縮、dependency 安裝及不接觸正式 Database 的 smoke test，以縮短中斷時間。遠端 Deploy Script 在 port `12345` 仍被使用時必須停止，不得強制結束未知 process。SQLite 備份必須在 Backend 停止後建立。切換 `current\` 前要記錄舊目標；管理者人工啟動後若 Health Check 失敗，先按 `Ctrl+C` 停止，再執行 Rollback Script，必要時還原剛才的 Database 備份。
 
-GitHub Actions、`backend-v*` Tag、production environment secrets、部署核准及 concurrency 屬於後續自動部署 Change。本 Change 先由 Developer 人工執行本機發布 Script，使用相同的 SCP、SSH、遠端部署、Health Check 與 rollback 介面。
+GitHub Actions、`backend-v*` Tag、production environment secrets、部署核准及 concurrency 屬於後續自動部署 Change。本 Change 先由 Developer 人工執行本機發布 Script，重用相同的 Artifact、SCP、SSH、Migration、Junction 與 rollback 介面；前景 process 的停止、啟動及 Health Check 由 Server 管理者人工完成。
 
 ### 17. 第一次初始化與平常發布使用不同入口
 
@@ -576,7 +580,8 @@ flowchart TD
     E --> F[複製遠端 Scripts 到 C:\BAP\scripts]
     F --> G[管理者建立 C:\BAP\config\.env]
     G --> I[Developer 發布第一個 Release]
-    I --> J[建立 current 並啟動 Backend Python process]
+    I --> J[建立 current]
+    J --> K[管理者以前景 Terminal 啟動並檢查]
     J --> K[GET /health]
 ```
 
@@ -586,7 +591,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Developer 完成 Backend 修改與測試] --> B[Developer commit]
+    S[Server 管理者在前景 Terminal 按 Ctrl+C] --> A[Developer 完成 Backend 修改與測試]
+    A --> B[Developer commit]
     B --> C[Push commit 到 GitHub]
     C --> D[執行 Publish-BapBackend.ps1]
     D --> E{Backend Artifact 輸入是否乾淨且已 push？}
@@ -596,13 +602,13 @@ flowchart TD
     H --> I[產生 ZIP、manifest 與 SHA-256]
     I --> J[SCP 上傳到 C:\BAP\incoming]
     J --> K[SSH 呼叫 Deploy-BapBackendRelease.ps1]
-    K --> L[驗證、準備 Release、備份與 Migration]
-    L --> M[切換 current 並重啟 Backend Python process]
-    M --> N[Test-BapBackendHealth.ps1]
-    N --> O{本機與公開 Health Check 是否通過？}
-    O -- 是 --> P[回報部署成功]
-    O -- 否 --> Q[Rollback-BapBackendRelease.ps1]
-    Q --> R[切回上一版並再次檢查]
+    K --> L[確認 port 已停止、準備 Release、備份與 Migration]
+    L --> M[切換 current 並回報 Release 已部署]
+    M --> N[Server 管理者以前景 Terminal 啟動]
+    N --> O[Test-BapBackendHealth.ps1]
+    O --> P{本機與公開 Health Check 是否通過？}
+    P -- 是 --> Q[部署驗證完成]
+    P -- 否 --> R[管理者停止並人工 Rollback]
 ```
 
 ### 18. Artifact 只能代表已 commit 且可找回的 Git 快照
@@ -671,7 +677,7 @@ README 至少包含：專案用途、資料夾導覽、安裝開發相依套件�
 flowchart LR
     I[Initialize] --> IC[檢查 SSH 與工具] --> ID[建立 C:\BAP 與 ACL] --> IE[建立 .env] --> IF[首次部署]
     T[Test] --> TU[Unit tests] --> TI[Integration tests] --> TA[Artifact tests]
-    D[Deploy] --> DC[Commit + Push] --> DB[Build Artifact] --> DS[SCP + SSH] --> DM[Migration + current] --> DH[Health Check]
+    D[Deploy] --> DP[管理者停止前景 Backend] --> DC[Commit + Push] --> DB[Build Artifact] --> DS[SCP + SSH] --> DM[Migration + current] --> DA[管理者前景啟動] --> DH[Health Check]
     U[Update Scripts] --> UC[Commit + Push] --> UA[Script Artifact] --> UB[Bootstrap 驗證] --> US[切換 Scripts]
 ```
 
@@ -687,14 +693,14 @@ README 的 pipeline 只摘要「會做哪些事」；詳細安全檢查與實作
 - **Refresh Token 被竊取可能維持 30 天登入** → 只保存 hash、每次 refresh 輪替、支援撤銷，Desktop App 使用 credential store。
 - **未簽章 Windows installer 可能觸發 SmartScreen** → build 先產生可測試安裝檔；正式公開前另行取得 code-signing certificate 並加入簽章步驟。
 - **更新檢查與登入共用同一網域，伺服器失效時兩者都不可用** → 更新檢查永不阻擋；登入顯示可重試錯誤。本機 IMU service 保持可獨立測試。
-- **`current\` 切換期間若 Backend process 沒有停止，可能仍鎖住舊 Release 或讀到不一致檔案** → 使用 PID file 與 process command line 交叉確認後停止，完成 Junction 更新後才重新啟動。
+- **`current\` 切換期間若前景 Backend 沒有停止，可能仍鎖住舊 Release 或讀到不一致檔案** → Deploy 與 Rollback 在 port `12345` 仍被使用時拒絕繼續，要求管理者回到前景 Terminal 按 `Ctrl+C`，完成 Junction 更新後再人工啟動。
 - **Artifact、manifest 與 Release SHA 不一致可能部署錯誤版本** → 準備 Release 前交叉驗證三者，Release 建立後不得原地修改。
-- **SQLite migration 失敗可能讓新舊 Backend 都無法使用** → 停止 Backend process 後先備份，migration 及 Health Check 任一步失敗就依相容性切回 Release 並還原備份。
+- **SQLite migration 或人工啟動後的 Health Check 失敗，可能讓新舊 Backend 都無法使用** → 停止前景 Backend 後先備份；migration 失敗時 Deploy Script 還原備份，Health Check 失敗時由管理者停止新版本、人工 rollback，並視相容性還原備份。
 - **將 repository 與 package 同時改名可能遺漏 scripts、文件或 installer metadata** → 使用不分大小寫的全 repository 搜尋、import tests、installer smoke test 與 remote URL 檢查作為完成條件。
 - **Developer 忘記 commit 就發布，可能讓 Artifact SHA 與實際內容不同** → 發布 Script 拒絕 dirty Backend inputs，並只從 `HEAD` 的乾淨暫存快照打包；正式部署還要確認 commit 已 push。
 - **遠端 `C:\BAP\scripts` 與 repository 版本不同可能產生不可預期結果** → repository 是唯一 source of truth，初始化及 Script 更新都有版本檢查，不允許直接在 Server 上做未回存的修改。
-- **Developer 電腦在遠端部署途中斷線** → 遠端 Deploy Script 收到完整 Artifact 後自行完成或 rollback，重複呼叫同一 SHA 時回報既有狀態，不覆寫 Release。
-- **普通 Python process 不會在 Windows 重開機後自行恢復** → Prototype 清楚記錄限制並提供 `Start-BapBackend.ps1`；正式自動啟動另立 Change 評估 Windows Service 或其他 process supervisor。
+- **Developer 電腦在遠端部署途中斷線** → 遠端 Deploy Script 收到完整 Artifact 後自行完成 Migration 與 Junction 切換；步驟失敗時保留或還原可用的舊 Junction 與 Database 備份，重複呼叫同一 SHA 不覆寫既有 Release。
+- **前景 Python process 會在 Terminal 關閉或 Windows 重開機後停止** → Prototype 清楚記錄限制並提供 `Start-BapBackend.ps1 -Foreground`；正式自動啟動另立 Change 評估 Windows Service、Scheduled Task 或其他 process supervisor。
 - **SSH Public Key 可以用管理員權限修改遠端檔案** → 發布 Script 使用 `BatchMode=yes`、固定 Host Fingerprint、限制 Artifact 內容並保存部署紀錄；Private Key 不進 repository 或 Artifact。
 
 ## Migration Plan
@@ -705,11 +711,11 @@ README 的 pipeline 只摘要「會做哪些事」；詳細安全檢查與實作
 4. 建立 Backend API、Service、Repository、Database、Security 與 Settings 分層，以及初始 Alembic migration，產生 `users`、`refresh_sessions` 與 `app_releases`。
 5. 在本機啟動 Backend 與測試 Database，完成 API contract tests、Health Check、Migration tests 及 Desktop App integration tests。
 6. 建立符合介面的 Backend Artifact 與 manifest，在隔離的 Windows 測試位置驗證解壓縮、鎖定 dependency 安裝、外部設定、Migration、啟動與 `/health`。
-7. 在測試伺服器以既有 `user` 帳號建立 `C:\BAP`、持久資料目錄、PID 管理與第一個 `current\` Junction，以文件化的人工流程部署並驗證 process restart 與 rollback。
+7. 在測試伺服器以既有 `user` 帳號建立 `C:\BAP`、持久資料目錄與第一個 `current\` Junction，以文件化流程部署，並驗證前景 Terminal 的人工停止、啟動、Health Check 與 rollback。
 8. 在 Windows 建立 BAP installer，於乾淨的 Windows 測試環境驗證安裝、啟動、序列埠測試與移除。
-9. 第一版由 Developer 本機發布 Script 完成 SCP、SSH、遠端切換與失敗 rollback；GitHub Actions、Tag 觸發、production secrets、部署核准與 concurrency 留給後續自動部署 Change。
+9. 第一版由 Developer 本機發布 Script 完成 SCP、SSH、Migration 與遠端切換；前景 Backend 的停止、啟動、Health Check 及失敗 rollback 由 Server 管理者人工完成。GitHub Actions、Tag 觸發、production secrets、部署核准與 concurrency 留給後續自動部署 Change。
 
-若 Backend 需要 rollback，以 `Stop-BapBackend.ps1` 停止 Python process、將 `current\` 指回上一個 Release，必要時還原停止 process 後建立的 Database 備份，再以 `Start-BapBackend.ps1` 重新啟動並檢查 `/health`。Desktop App rollback 則由測試 user 移除 Prototype。既有 CLI 與研究資料 Change 的行為不受影響。
+若 Backend 需要 rollback，管理者先回到前景 Terminal 按 `Ctrl+C`，再執行 `Rollback-BapBackendRelease.ps1` 將 `current\` 指回上一個 Release，必要時還原停止 process 後建立的 Database 備份，最後以 `Start-BapBackend.ps1 -Foreground` 人工啟動並檢查 `/health`。Desktop App rollback 則由測試 user 移除 Prototype。既有 CLI 與研究資料 Change 的行為不受影響。
 
 ## Open Questions
 
