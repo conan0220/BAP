@@ -71,6 +71,14 @@ def test_initialize_validates_public_key_format_and_authorized_keys_acl() -> Non
     assert "icacls" not in initialize.lower()
 
 
+def test_initialize_requires_uv_without_fixed_global_python() -> None:
+    initialize = (SCRIPTS / "Initialize-BapBackendHost.ps1").read_text(encoding="utf-8")
+    assert "$UvPath --version" in initialize
+    assert "$PythonPath" not in initialize
+    assert "C:\\Python312\\python.exe" not in initialize
+    assert "Python 3.12 is required" not in initialize
+
+
 def test_process_scripts_use_pid_and_verify_command_before_stopping() -> None:
     start = (SCRIPTS / "Start-BapBackend.ps1").read_text(encoding="utf-8")
     stop = (SCRIPTS / "Stop-BapBackend.ps1").read_text(encoding="utf-8")

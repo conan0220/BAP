@@ -2,16 +2,12 @@
 param(
     [string]$Root = "C:\BAP",
     [string]$ExpectedUser = "user",
-    [string]$PythonPath = "C:\Python312\python.exe",
     [string]$UvPath = "C:\Users\user\.local\bin\uv.exe",
     [switch]$SkipHostChecks
 )
 
 $ErrorActionPreference = "Stop"
 if (-not $SkipHostChecks) {
-    if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) { throw "Python 3.12 was not found." }
-    $PythonVersion = (& $PythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
-    if ($PythonVersion -ne "3.12") { throw "Python 3.12 is required." }
     if (-not (Test-Path -LiteralPath $UvPath -PathType Leaf)) { throw "uv was not found." }
     & $UvPath --version | Out-Null
     if (-not (Get-LocalUser -Name $ExpectedUser -ErrorAction SilentlyContinue)) { throw "Expected Windows user does not exist." }
