@@ -24,7 +24,7 @@ $Stage = Join-Path $TempRoot "artifact"
 try {
     New-Item -ItemType Directory -Path $Snapshot, $Stage, $OutputDirectory -Force | Out-Null
     $Inputs = @(
-        "bap_backend", "bap_common", "migrations", "tests/backend", "tests/conftest.py",
+        "bap_backend", "bap_common", "migrations", "tests/backend", "deployment/windows/backend",
         "alembic.ini", "pyproject.toml", "uv.lock", ".python-version"
     )
     & $GitPath -C $RepoRoot archive --format=zip --output=$SnapshotZip $FullSha -- $Inputs
@@ -35,8 +35,23 @@ try {
         & $UvPath sync --directory $Snapshot --frozen --extra backend --group dev --no-extra desktop --no-extra packaging
         if ($LASTEXITCODE -ne 0) { throw "Unable to install locked Backend test dependencies." }
         $SnapshotPython = Join-Path $Snapshot ".venv\Scripts\python.exe"
-        & $SnapshotPython -m pytest (Join-Path $Snapshot "tests\backend") -q
-        if ($LASTEXITCODE -ne 0) { throw "Backend tests failed in the clean Git snapshot." }
+        $BackendTests = Join-Path $Snapshot "tests\backend"
+        $PytestTemp = Join-Path $TempRoot "pytest-temp"
+        New-Item -ItemType Directory -Path $PytestTemp -Force | Out-Null
+        $PreviousPluginAutoload = $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD
+        $TestExitCode = 1
+        try {
+            $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+            & $SnapshotPython -m pytest --confcutdir=$BackendTests --basetemp=$PytestTemp $BackendTests -q
+            $TestExitCode = $LASTEXITCODE
+        } finally {
+            if ($null -eq $PreviousPluginAutoload) {
+                Remove-Item Env:PYTEST_DISABLE_PLUGIN_AUTOLOAD -ErrorAction SilentlyContinue
+            } else {
+                $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = $PreviousPluginAutoload
+            }
+        }
+        if ($TestExitCode -ne 0) { throw "Backend tests failed in the clean Git snapshot." }
     }
 
     foreach ($Path in @("bap_backend", "bap_common", "migrations", "alembic.ini", "pyproject.toml", "uv.lock", ".python-version")) {

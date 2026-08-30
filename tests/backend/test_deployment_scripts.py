@@ -95,8 +95,17 @@ def test_build_uses_clean_git_archive_and_excludes_tests_from_stage() -> None:
     assert "git" not in build.lower() or "archive" in build.lower()
     assert "archive --format=zip" in build
     assert "deployment-manifest.json" in build
+    snapshot_inputs = build.split("$Inputs = @(", 1)[1].split(")", 1)[0]
+    assert '"tests/backend"' in snapshot_inputs
+    assert '"deployment/windows/backend"' in snapshot_inputs
+    assert '"tests/conftest.py"' not in snapshot_inputs
+    assert '"tests/helpers.py"' not in snapshot_inputs
+    assert "--confcutdir=$BackendTests" in build
+    assert "--basetemp=$PytestTemp" in build
+    assert 'PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"' in build
     stage_copy = build.split("foreach ($Path", 1)[1]
     assert '"tests"' not in stage_copy.split(")", 1)[0]
+    assert '"deployment"' not in stage_copy.split(")", 1)[0]
 
 
 def _manifest(sha: str, component: str) -> dict:

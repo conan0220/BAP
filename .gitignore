@@ -11,6 +11,7 @@ wheels/
 
 # Test output
 .coverage
+.pytest_cache/
 
 # Local vendor tools and captured recordings
 /ANROT-IMU-v1.3.6-windows-x64/
