@@ -118,7 +118,7 @@
 - [x] 10.11 建立最小且穩定的 `Update-BapDeploymentScripts.ps1`，驗證 checksum、commit SHA 與允許的檔案，解壓縮到 `C:\BAP\scripts-releases\<commit-sha>`，安全切換 `C:\BAP\scripts`，失敗時保留舊版，且不得在執行途中覆寫自己。
 - [x] 10.12 完成 Prototype 遠端 Backend 部署順序：Server 管理者先以 `Ctrl+C` 停止前景 Backend，發布 Script 再準備 Release、確認 port `12345` 未被使用、備份 SQLite、執行 Alembic migration、記錄舊 `current\` 並切換；完成後由管理者人工以前景 Terminal 啟動，再以 `Test-BapBackendHealth.ps1` 檢查 Server 本機與公開 `/health`。
 - [x] 10.13 建立 `Rollback-BapBackendRelease.ps1` 與 rollback tests，確認 rollback 前要求前景 Backend 已停止、`current\` 指回上一個 Release、必要時還原 Database 備份；完成後由管理者人工啟動上一版並檢查 `/health`。
-- [ ] 10.14 在隔離的 Windows 測試主機執行第一次初始化、部署 Script 更新及後續第二次 Backend 發布的端到端測試，確認初始化 Script 可重複執行、持久資料不被覆蓋、Server 管理者可在部署前後人工停止與啟動前景 Backend，且 Developer 的 Build、SCP、SSH、Migration 與 `current\` 切換只需執行本機發布 Script。
+- [x] 10.14 在隔離的 Windows 測試主機執行第一次初始化、部署 Script 更新及後續第二次 Backend 發布的端到端測試，確認初始化 Script 可重複執行、持久資料不被覆蓋、Server 管理者可在部署前後人工停止與啟動前景 Backend，且 Developer 的 Build、SCP、SSH、Migration 與 `current\` 切換只需執行本機發布 Script。
 - [x] 10.15 以實際 Windows SSH 部署驗證背景 child process 會在 session 結束後失效，因此 Prototype 明確只支援 Terminal 前景啟動；確認 Terminal 關閉或 Windows 重新開機後不宣稱 Backend 會持續運行或自動啟動。
 - [x] 10.16 驗證 `C:\BAP\bootstrap\Update-BapDeploymentScripts.ps1`、Private Key、`.env`、Database、Log、Token 與 user 資料都不會進入 Backend Artifact 或部署 Script Artifact。
 - [x] 10.17 驗證 Backend 正確監聽 `0.0.0.0:12345`，並在既有 Caddy 前置條件下通過 `http://127.0.0.1:12345/health`、公開 `/health`、`/openapi.json` 與 `/docs`；本 Change 不修改 DNS、TLS certificate、HTTPS termination 或 Reverse Proxy。
