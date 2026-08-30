@@ -138,4 +138,4 @@
 
 - [x] 12.1 以不分大小寫的全 repository 搜尋確認 project-owned 檔案沒有殘留舊專案名稱或舊 package 名稱，並確認 BAP、Boxing Analysis Platform、`bap_desktop`、`bap_backend`、installer 與 Backend process 命名一致。
 - [x] 12.2 確認已改名的 GitHub repository 可由 `git@github.com:conan0220/BAP.git` 存取，更新本機 `origin` URL，並驗證 fetch、push 與 GitHub Actions workflow references 指向新 repository。
-- [ ] 12.3 在所有測試與文件驗證完成後，將本機專案資料夾名稱改為 `D:\repos\BAP`，重新開啟 workspace，確認 OpenSpec、tests、package build 與 Git 操作不依賴舊絕對路徑。
+- [x] 12.3 在所有測試與文件驗證完成後，將本機專案資料夾名稱改為 `D:\repos\BAP`，重新開啟 workspace，確認 OpenSpec、tests、package build 與 Git 操作不依賴舊絕對路徑。
