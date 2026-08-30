@@ -40,11 +40,13 @@ try {
         New-Item -ItemType Directory -Path $PytestTemp -Force | Out-Null
         $PreviousPluginAutoload = $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD
         $TestExitCode = 1
+        Push-Location $Snapshot
         try {
             $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
             & $SnapshotPython -m pytest --confcutdir=$BackendTests --basetemp=$PytestTemp $BackendTests -q
             $TestExitCode = $LASTEXITCODE
         } finally {
+            Pop-Location
             if ($null -eq $PreviousPluginAutoload) {
                 Remove-Item Env:PYTEST_DISABLE_PLUGIN_AUTOLOAD -ErrorAction SilentlyContinue
             } else {

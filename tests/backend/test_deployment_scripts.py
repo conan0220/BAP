@@ -103,6 +103,8 @@ def test_build_uses_clean_git_archive_and_excludes_tests_from_stage() -> None:
     assert "--confcutdir=$BackendTests" in build
     assert "--basetemp=$PytestTemp" in build
     assert 'PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"' in build
+    assert "Push-Location $Snapshot" in build
+    assert "Pop-Location" in build
     stage_copy = build.split("foreach ($Path", 1)[1]
     assert '"tests"' not in stage_copy.split(")", 1)[0]
     assert '"deployment"' not in stage_copy.split(")", 1)[0]
