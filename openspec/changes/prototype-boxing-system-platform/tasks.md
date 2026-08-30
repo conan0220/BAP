@@ -99,7 +99,7 @@
 
 - [x] 9.1 建立 PyInstaller one-folder spec，收集 PySide6 platform plugin、translations 與 App resources，並在 Windows build runner 驗證可啟動。
 - [x] 9.2 建立 BAP Inno Setup installer script，包含 `BAP` 顯示名稱、`Boxing Analysis Platform` 產品資訊、開始功能表捷徑、版本資訊及移除流程，不要求目標電腦預先安裝 Python。
-- [ ] 9.3 在乾淨 Windows 測試環境執行 BAP installer smoke test，驗證安裝、啟動、登入畫面、App 移除及無殘留暫存 IMU CSV。
+- [x] 9.3 在乾淨 Windows 測試環境執行 BAP installer smoke test，驗證安裝、啟動、登入畫面、App 移除及無殘留暫存 IMU CSV。
 - [x] 9.4 記錄 Prototype unsigned installer 的發行步驟，並預留日後 code-signing hook；Desktop installer 發行與 Backend GitHub Actions 自動部署保持分離。
 - [x] 9.5 將第一版設定為 per-user 安裝到 `%LOCALAPPDATA%\Programs\BAP`，並建立 `%LOCALAPPDATA%\BAP` 下的非敏感設定、Log 與 `temp\imu-diagnostics`；測試 Refresh Token 只進入 Windows Credential Manager，匯出 CSV 不會被暫存清理刪除。
 
