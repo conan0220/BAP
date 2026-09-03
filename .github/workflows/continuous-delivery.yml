@@ -120,6 +120,8 @@ jobs:
           .\.venv\Scripts\python.exe -m bap_backend.tools.delivery_candidate validate `
             --candidate-dir "$env:RUNNER_TEMP\candidate" `
             --expected-tree "${{ needs.resolve.outputs.source_tree_sha }}" `
+            --expected-backend-changed "${{ needs.resolve.outputs.backend_changed }}" `
+            --expected-desktop-changed "${{ needs.resolve.outputs.desktop_changed }}" `
             --github-output "$env:GITHUB_OUTPUT"
           $manifest = Get-Content "$env:RUNNER_TEMP\candidate\delivery-manifest.json" -Raw | ConvertFrom-Json
           if ("$($manifest.pr_number)" -ne "${{ needs.resolve.outputs.pr_number }}") { throw "Candidate PR does not match." }

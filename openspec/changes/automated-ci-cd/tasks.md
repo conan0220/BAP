@@ -108,6 +108,6 @@
 - [x] 10.7 執行 OpenSpec strict validation、pytest、Workflow YAML／contract、API integration、Qt E2E、packaging、deployment-interface 與 Scenario coverage。
 - [x] 10.8 建立測試 PR，驗證 Windows Runner 1 只 Build 一次、由 Artifact 安裝並上傳 Candidate。
 - [x] 10.9 人工 Merge 測試 PR，驗證 Windows Runner 2 下載同一 Candidate、不重新 Build，並正確執行 scope routing。
-- [ ] 10.10 分別驗證 backend-only、desktop-only、shared 與 docs-only 流程。
+- [x] 10.10 分別驗證 backend-only、desktop-only、shared 與 docs-only 流程。
 - [ ] 10.11 故意造成 checksum／Tree／scope mismatch 與 Production health failure，驗證 fail closed、Rollback、Last Known Good 與 Email 通知。
-- [ ] 10.12 完成一次 Cutover 後的全新 PR→CI→人工 Merge→CD E2E，確認舊 Script 已移除且開發者 workspace 不產生正式 Artifact。
+- [x] 10.12 完成一次 Cutover 後的全新 PR→CI→人工 Merge→CD E2E，確認舊 Script 已移除且開發者 workspace 不產生正式 Artifact。

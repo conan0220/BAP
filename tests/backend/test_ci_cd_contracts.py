@@ -157,6 +157,12 @@ def test_candidate_validates_tree_and_checksums(tmp_path) -> None:
     )
     (tmp_path / "delivery-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert validate_candidate(tmp_path, expected_source_tree_sha=TREE).source_tree_sha == TREE
+    with pytest.raises(ValueError, match="Source Tree SHA"):
+        validate_candidate(tmp_path, expected_source_tree_sha=SHA_A)
+    with pytest.raises(ValueError, match="Backend scope mismatch"):
+        validate_candidate(tmp_path, expected_backend_changed=False)
+    with pytest.raises(ValueError, match="Desktop scope mismatch"):
+        validate_candidate(tmp_path, expected_desktop_changed=False)
     desktop.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="checksum"):
         validate_candidate(tmp_path, expected_source_tree_sha=TREE)

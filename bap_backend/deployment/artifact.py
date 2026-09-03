@@ -91,6 +91,8 @@ def validate_candidate(
     directory: str | Path,
     *,
     expected_source_tree_sha: str | None = None,
+    expected_backend_changed: bool | None = None,
+    expected_desktop_changed: bool | None = None,
 ) -> DeliveryManifest:
     root = Path(directory)
     manifest = DeliveryManifest.model_validate_json(
@@ -103,6 +105,10 @@ def validate_candidate(
         raise ValueError("Candidate has expired")
     if expected_source_tree_sha and manifest.source_tree_sha != expected_source_tree_sha.lower():
         raise ValueError("Candidate Source Tree SHA does not match master")
+    if expected_backend_changed is not None and manifest.backend_changed != expected_backend_changed:
+        raise ValueError("Backend scope mismatch.")
+    if expected_desktop_changed is not None and manifest.desktop_changed != expected_desktop_changed:
+        raise ValueError("Desktop scope mismatch.")
     if manifest.docs_only:
         if manifest.backend_changed or manifest.desktop_changed or manifest.backend or manifest.desktop:
             raise ValueError("docs-only Candidate has an inconsistent scope")
