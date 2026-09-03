@@ -2,6 +2,6 @@
 
 APP_NAME = "BAP"
 PRODUCT_NAME = "Boxing Analysis Platform"
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = ["APP_NAME", "PRODUCT_NAME", "__version__"]
