@@ -43,6 +43,9 @@ def test_scope_cli_runs_without_installed_project_dependencies() -> None:
 @pytest.mark.scenario("pull-request-ci", "執行真實 HTTP user flow")
 def test_pr_workflow_builds_installs_and_tests_one_candidate() -> None:
     text = PR.read_text(encoding="utf-8")
+    candidate_test = (ROOT / "deployment/ci/Test-BapCandidate.ps1").read_text(
+        encoding="utf-8"
+    )
     assert "pull_request:" in text
     assert "Build-BapBackendArtifact.ps1" in text
     assert "Build-BapDesktop.ps1" in text
@@ -53,6 +56,7 @@ def test_pr_workflow_builds_installs_and_tests_one_candidate() -> None:
     assert "Select-Object -Single" not in text
     assert "Expected exactly one Backend Artifact" in text
     assert "Expected exactly one Desktop Installer" in text
+    assert '$WindowsUvPath = $UvPath + ".exe"' in candidate_test
 
 
 @pytest.mark.scenario("pull-request-ci", "docs-only PR 不使用 Windows Runner")

@@ -19,7 +19,14 @@ if (-not $WorkDirectory) {
         Join-Path $RepoRoot ".candidate-e2e"
     }
 }
-if (-not (Test-Path -LiteralPath $UvPath -PathType Leaf)) { throw "uv was not found: $UvPath" }
+if (-not (Test-Path -LiteralPath $UvPath -PathType Leaf)) {
+    $WindowsUvPath = $UvPath + ".exe"
+    if (Test-Path -LiteralPath $WindowsUvPath -PathType Leaf) {
+        $UvPath = $WindowsUvPath
+    } else {
+        throw "uv was not found: $UvPath"
+    }
+}
 Assert-BapChecksum -ArtifactPath $BackendArtifact -ChecksumPath $BackendChecksum
 if (-not (Test-Path -LiteralPath $DesktopInstaller -PathType Leaf)) { throw "Desktop Installer was not found." }
 
