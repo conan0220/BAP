@@ -106,7 +106,7 @@
 - [x] 10.5 為 `ci-cd-status-reporting` 的每個 Scenario 建立 automated／contract test與 marker。
 - [x] 10.6 建立 Scenario coverage checker，缺少測試 marker 時使 CI 失敗。
 - [x] 10.7 執行 OpenSpec strict validation、pytest、Workflow YAML／contract、API integration、Qt E2E、packaging、deployment-interface 與 Scenario coverage。
-- [ ] 10.8 建立測試 PR，驗證 Windows Runner 1 只 Build 一次、由 Artifact 安裝並上傳 Candidate。
+- [x] 10.8 建立測試 PR，驗證 Windows Runner 1 只 Build 一次、由 Artifact 安裝並上傳 Candidate。
 - [ ] 10.9 人工 Merge 測試 PR，驗證 Windows Runner 2 下載同一 Candidate、不重新 Build，並正確執行 scope routing。
 - [ ] 10.10 分別驗證 backend-only、desktop-only、shared 與 docs-only 流程。
 - [ ] 10.11 故意造成 checksum／Tree／scope mismatch 與 Production health failure，驗證 fail closed、Rollback、Last Known Good 與 Email 通知。

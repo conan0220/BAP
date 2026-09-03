@@ -14,7 +14,9 @@ if (-not $PreviousRelease) { $PreviousRelease = (Get-Content -LiteralPath (Join-
 $PreviousRelease = Assert-BapReleasePath -Root $Root -ReleasePath $PreviousRelease
 if (-not (Test-Path -LiteralPath $PreviousRelease -PathType Container)) { throw "Previous release does not exist." }
 
-if (-not $SkipScheduledTaskForTesting) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
+if (-not $SkipScheduledTaskForTesting) {
+    Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName
+}
 $Current = Join-Path $Root "current"
 Remove-BapCurrentJunction -Root $Root
 & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $PreviousRelease | Out-Null

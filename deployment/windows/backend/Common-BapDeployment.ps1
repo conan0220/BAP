@@ -71,6 +71,58 @@ function Remove-BapCurrentJunction {
     [IO.Directory]::Delete($Current)
 }
 
+function Stop-BapBackendTaskAndListener {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [string]$TaskName = "BAPBackend",
+        [int]$Port = 12345
+    )
+    $Task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($Task -and $Task.State -eq "Running") {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    }
+
+    # Windows Task Scheduler can report Ready after stopping the PowerShell
+    # action while the Python launcher and its uvicorn child remain alive.
+    # Give a normal stop a short chance, then terminate only a listener whose
+    # process tree and command line prove that it belongs to this BAP root.
+    for ($Attempt = 0; $Attempt -lt 3; $Attempt++) {
+        if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) { return }
+        Start-Sleep -Seconds 1
+    }
+
+    $Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    $RootFull = [IO.Path]::GetFullPath($Root).TrimEnd("\").ToLowerInvariant()
+    $CurrentPython = (Join-Path $RootFull "current\.venv\scripts\python.exe")
+    $ReleasePrefix = (Join-Path $RootFull "releases\")
+    foreach ($Listener in $Listeners) {
+        $Owner = Get-CimInstance Win32_Process -Filter ("ProcessId = " + [int]$Listener.OwningProcess)
+        $Parent = if ($Owner) {
+            Get-CimInstance Win32_Process -Filter ("ProcessId = " + [int]$Owner.ParentProcessId)
+        } else {
+            $null
+        }
+        $OwnerCommand = if ($Owner -and $Owner.CommandLine) { [string]$Owner.CommandLine } else { "" }
+        $ParentCommand = if ($Parent -and $Parent.CommandLine) { ([string]$Parent.CommandLine).ToLowerInvariant() } else { "" }
+        $IsUvicorn = $OwnerCommand -match "(?i)(^|\s)-m\s+uvicorn(\s|$)"
+        $IsBapApp = $OwnerCommand -match "(?i)bap_backend\.app\.main:app"
+        $IsExpectedPort = $OwnerCommand -match ("(?i)--port\s+" + $Port + "(\s|$)")
+        $IsCurrentPython = $ParentCommand.Contains($CurrentPython)
+        $IsReleasePython = $ParentCommand.Contains($ReleasePrefix) -and $ParentCommand.Contains("\.venv\scripts\python.exe")
+        if (-not ($Owner -and $Parent -and $IsUvicorn -and $IsBapApp -and $IsExpectedPort -and ($IsCurrentPython -or $IsReleasePython))) {
+            throw "Backend port belongs to an unrecognized process; refusing to terminate it."
+        }
+        Stop-Process -Id ([int]$Owner.ProcessId) -Force -ErrorAction Stop
+        Stop-Process -Id ([int]$Parent.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+
+    for ($Attempt = 0; $Attempt -lt 10; $Attempt++) {
+        if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) { return }
+        Start-Sleep -Seconds 1
+    }
+    throw "Backend port remained active after stopping the Scheduled Task."
+}
+
 function Assert-BapReleasePath {
     param(
         [Parameter(Mandatory = $true)][string]$Root,
