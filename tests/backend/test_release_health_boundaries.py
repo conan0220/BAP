@@ -64,6 +64,13 @@ def test_release_management_input_requires_semver_https_and_sha256() -> None:
             raise AssertionError(f"Expected invalid release input: {values}")
 
 
+def test_release_publisher_confirmation_is_safe_for_legacy_windows_consoles() -> None:
+    source = (
+        Path(__file__).parents[2] / "bap_backend/tools/publish_desktop_release.py"
+    ).read_text(encoding="utf-8")
+    assert 'print(f"Published {args.platform.lower()} {args.version}")' in source
+
+
 def test_health_reports_database_and_commit(backend_context) -> None:
     client, _, _, _ = backend_context
     response = client.get("/health")

@@ -66,7 +66,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         session.commit()
-    print(f"已發布 {args.platform.lower()} {args.version}")
+    # GitHub's Windows runner may expose a legacy console code page. Keep
+    # operational output ASCII so encoding cannot turn success into failure.
+    print(f"Published {args.platform.lower()} {args.version}")
     return 0
 
 
