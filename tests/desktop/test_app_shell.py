@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,54 @@ from bap_desktop.services.imu_discovery import DiscoveryResult
 from bap_desktop.services.shutdown import ShutdownCoordinator
 from bap_desktop.ui.main_window import MainWindow
 from bap_desktop.ui.punch_items import PunchItemPage
+
+
+def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
+    import bap_desktop.api_client as api_client
+    import bap_desktop.settings as desktop_settings
+    from bap_desktop.app import _run_api_e2e
+
+    class FakeAuthClient:
+        registrations = 0
+
+        def __init__(self, base_url: str) -> None:
+            assert base_url == "http://127.0.0.1:12345/api/"
+
+        def register(self, username: str, password: str) -> dict[str, str]:
+            self.registrations += 1
+            if self.registrations == 2:
+                raise api_client.ApiRejectedError("duplicate", 409)
+            return {"username": username}
+
+        def login(self, username: str, password: str):
+            if password.endswith("wrong"):
+                raise api_client.ApiRejectedError("invalid", 401)
+            return SimpleNamespace(refresh_token="first-refresh")
+
+        def refresh(self, refresh_token: str):
+            assert refresh_token == "first-refresh"
+            return SimpleNamespace(refresh_token="second-refresh")
+
+        def logout(self, refresh_token: str) -> None:
+            assert refresh_token == "second-refresh"
+
+    class FakeReleaseClient:
+        def __init__(self, base_url: str) -> None:
+            assert base_url == "http://127.0.0.1:12345/api/"
+
+        def latest(self, platform: str):
+            assert platform == "windows"
+            return SimpleNamespace(source_tree_sha="a" * 40)
+
+    monkeypatch.setattr(api_client, "AuthApiClient", FakeAuthClient)
+    monkeypatch.setattr(api_client, "ReleaseApiClient", FakeReleaseClient)
+    monkeypatch.setattr(
+        desktop_settings,
+        "DesktopSettings",
+        lambda: SimpleNamespace(api_base_url="http://127.0.0.1:12345/api/"),
+    )
+
+    assert _run_api_e2e() == 0
 
 
 @dataclass

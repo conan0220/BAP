@@ -1,4 +1,4 @@
-"""Create or update one Desktop App release from the Server terminal."""
+"""Create or update one Desktop App release after GitHub publishes it."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from bap_backend.app.repositories import ReleaseRepository
 
 
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
+_TREE_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -24,11 +25,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", required=True)
     parser.add_argument("--download-url", required=True)
     parser.add_argument("--sha256", required=True)
+    parser.add_argument("--source-tree-sha", required=True)
     parser.add_argument("--published-at", default=None, help="ISO 8601；預設使用目前 UTC")
     return parser
 
 
-def validate_release_input(version: str, download_url: str, sha256: str) -> None:
+def validate_release_input(version: str, download_url: str, sha256: str, source_tree_sha: str) -> None:
     try:
         Version(version)
     except InvalidVersion as error:
@@ -38,12 +40,14 @@ def validate_release_input(version: str, download_url: str, sha256: str) -> None
         raise ValueError("download URL 必須是完整 HTTPS URL")
     if _SHA256.fullmatch(sha256) is None:
         raise ValueError("sha256 必須是 64 個十六進位字元")
+    if _TREE_SHA.fullmatch(source_tree_sha) is None:
+        raise ValueError("source tree sha 必須是 40 個十六進位字元")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        validate_release_input(args.version, args.download_url, args.sha256)
+        validate_release_input(args.version, args.download_url, args.sha256, args.source_tree_sha)
         published_at = datetime.fromisoformat(args.published_at) if args.published_at else datetime.utcnow()
     except ValueError as error:
         raise SystemExit(str(error)) from error
@@ -56,12 +60,15 @@ def main(argv: list[str] | None = None) -> int:
                 version=args.version,
                 download_url=args.download_url,
                 sha256=args.sha256.lower(),
+                source_tree_sha=args.source_tree_sha.lower(),
                 published_at=published_at,
                 is_active=True,
             )
         )
         session.commit()
-    print(f"已發布 {args.platform.lower()} {args.version}")
+    # GitHub's Windows runner may expose a legacy console code page. Keep
+    # operational output ASCII so encoding cannot turn success into failure.
+    print(f"Published {args.platform.lower()} {args.version}")
     return 0
 
 

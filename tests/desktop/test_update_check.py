@@ -47,6 +47,7 @@ def _release(**overrides) -> ReleaseData:
         "version": "0.2.0",
         "download_url": DOWNLOAD_URL,
         "sha256": "a" * 64,
+        "source_tree_sha": "c" * 40,
         "published_at": datetime.now(UTC),
     }
     values.update(overrides)
@@ -65,6 +66,7 @@ def test_release_api_client_uses_platform_query_and_typed_contract() -> None:
                 "version": "0.2.0",
                 "download_url": DOWNLOAD_URL,
                 "sha256": "a" * 64,
+                "source_tree_sha": "c" * 40,
                 "published_at": "2026-08-29T00:00:00Z",
             },
         )
@@ -77,6 +79,7 @@ def test_release_api_client_uses_platform_query_and_typed_contract() -> None:
 
     assert release.version == "0.2.0"
     assert release.download_url == DOWNLOAD_URL
+    assert release.source_tree_sha == "c" * 40
 
 
 @pytest.mark.scenario("desktop-app-update-check", "更新服務正常回應")

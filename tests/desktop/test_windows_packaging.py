@@ -48,16 +48,35 @@ def test_inno_setup_is_per_user_and_removes_only_managed_temporary_csv_area() ->
     assert "settings.json" not in installer
     assert "Credential Manager" not in installer
 
+    smoke_test = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "WaitForExit($TimeoutSeconds * 1000)" in smoke_test
+    assert 'Arguments @("--api-e2e-test")' in smoke_test
 
-def test_desktop_release_guide_and_clean_runner_keep_backend_deployment_separate() -> None:
+
+def test_desktop_candidate_is_built_in_pr_and_only_promoted_in_cd() -> None:
     guide = (ROOT / "docs/guides/desktop-release.md").read_text(encoding="utf-8")
-    workflow = (ROOT / ".github/workflows/build-desktop.yml").read_text(encoding="utf-8")
-    assert "未簽章" in guide
+    pr = (ROOT / ".github/workflows/pull-request-ci.yml").read_text(encoding="utf-8")
+    cd = (ROOT / ".github/workflows/continuous-delivery.yml").read_text(encoding="utf-8")
     assert "Code Signing" in guide
-    assert "Smoke-Test-BapInstaller.ps1" in guide
-    assert "windows-latest" in workflow
-    assert "Build-BapDesktop.ps1" in workflow
-    assert "Publish-BapBackend" not in workflow
+    assert "Smoke Test" in guide
+    assert "Build-BapDesktop.ps1" in pr
+    assert "Smoke-Test-BapInstaller.ps1" in (
+        ROOT / "deployment/ci/Test-BapCandidate.ps1"
+    ).read_text(encoding="utf-8")
+    assert "Build-BapDesktop.ps1" not in cd
+    assert "gh release create" in cd
+
+
+def test_desktop_build_reads_the_single_project_version_source() -> None:
+    build_script = (ROOT / "packaging/windows/Build-BapDesktop.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert 'Join-Path $RepoRoot "pyproject.toml"' in build_script
+    assert "tomllib" in build_script
+    assert "bap_desktop\\VERSION" not in build_script
+    assert 'bap-installer.iss") -Raw -Encoding UTF8' in build_script
 
 
 def test_refresh_token_storage_is_separate_from_non_sensitive_settings() -> None:

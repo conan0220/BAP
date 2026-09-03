@@ -33,6 +33,7 @@ class ReleaseRepository:
             return release
         current.download_url = release.download_url
         current.sha256 = release.sha256
+        current.source_tree_sha = release.source_tree_sha
         current.published_at = release.published_at
         current.is_active = release.is_active
         return current

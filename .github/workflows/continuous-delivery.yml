@@ -1,0 +1,304 @@
+name: Continuous Delivery
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: bap-production
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve tested Candidate
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      backend_changed: ${{ steps.scope.outputs.backend_changed }}
+      desktop_changed: ${{ steps.scope.outputs.desktop_changed }}
+      pr_number: ${{ steps.ci.outputs.pr_number }}
+      ci_run_id: ${{ steps.ci.outputs.ci_run_id }}
+      source_tree_sha: ${{ steps.tree.outputs.value }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: tree
+        name: Resolve master Source Tree SHA
+        run: echo "value=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - id: scope
+        name: Classify merged change
+        run: >-
+          python -m bap_backend.tools.delivery_candidate
+          --git-path git scope
+          --base "${{ github.event.before }}"
+          --head "${{ github.sha }}"
+          --github-output "$GITHUB_OUTPUT"
+      - id: ci
+        name: Find the associated successful PR CI run
+        if: steps.scope.outputs.docs_only != 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const prs = await github.paginate(
+              github.rest.repos.listPullRequestsAssociatedWithCommit,
+              { owner: context.repo.owner, repo: context.repo.repo, commit_sha: context.sha }
+            );
+            const pr = prs.find(item => item.merged_at && item.base.ref === "master");
+            if (!pr) return core.setFailed("No merged Pull Request is associated with this master commit.");
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "pull-request-ci.yml",
+                event: "pull_request",
+                status: "completed",
+                per_page: 100
+              }
+            );
+            const matchingRuns = runs.filter(
+              item => item.head_sha === pr.head.sha && item.conclusion === "success"
+            );
+            if (matchingRuns.length !== 1) {
+              return core.setFailed(
+                `Expected exactly one successful Pull Request CI run; found ${matchingRuns.length}.`
+              );
+            }
+            const run = matchingRuns[0];
+            core.setOutput("pr_number", String(pr.number));
+            core.setOutput("ci_run_id", String(run.id));
+      - name: Write resolver summary
+        run: |
+          {
+            echo "## Delivery routing"
+            echo "- master commit: ${{ github.sha }}"
+            echo "- Source Tree SHA: ${{ steps.tree.outputs.value }}"
+            echo "- docs_only: ${{ steps.scope.outputs.docs_only }}"
+            echo "- backend_changed: ${{ steps.scope.outputs.backend_changed }}"
+            echo "- desktop_changed: ${{ steps.scope.outputs.desktop_changed }}"
+            echo "- PR: ${{ steps.ci.outputs.pr_number || 'not required' }}"
+            echo "- CI run: ${{ steps.ci.outputs.ci_run_id || 'not required' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: Verify immutable Candidate
+    needs: resolve
+    if: needs.resolve.outputs.docs_only != 'true'
+    runs-on: windows-latest
+    outputs:
+      backend_filename: ${{ steps.validate.outputs.backend_filename }}
+      desktop_filename: ${{ steps.validate.outputs.desktop_filename }}
+      desktop_version: ${{ steps.metadata.outputs.version }}
+      desktop_sha256: ${{ steps.metadata.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install validation dependencies
+        shell: powershell
+        run: uv sync --frozen --no-dev
+      - name: Download the PR Candidate
+        uses: actions/download-artifact@v7
+        with:
+          name: bap-candidate-pr-${{ needs.resolve.outputs.pr_number }}
+          path: ${{ runner.temp }}\candidate
+          run-id: ${{ needs.resolve.outputs.ci_run_id }}
+          github-token: ${{ github.token }}
+      - id: validate
+        name: Fail closed on metadata or checksum mismatch
+        shell: powershell
+        run: |
+          .\.venv\Scripts\python.exe -m bap_backend.tools.delivery_candidate validate `
+            --candidate-dir "$env:RUNNER_TEMP\candidate" `
+            --expected-tree "${{ needs.resolve.outputs.source_tree_sha }}" `
+            --github-output "$env:GITHUB_OUTPUT"
+          $manifest = Get-Content "$env:RUNNER_TEMP\candidate\delivery-manifest.json" -Raw | ConvertFrom-Json
+          if ("$($manifest.pr_number)" -ne "${{ needs.resolve.outputs.pr_number }}") { throw "Candidate PR does not match." }
+          if ("$($manifest.ci_workflow_run_id)" -ne "${{ needs.resolve.outputs.ci_run_id }}") { throw "Candidate CI run does not match." }
+          if ("$($manifest.backend_changed)".ToLowerInvariant() -ne "${{ needs.resolve.outputs.backend_changed }}") { throw "Backend scope mismatch." }
+          if ("$($manifest.desktop_changed)".ToLowerInvariant() -ne "${{ needs.resolve.outputs.desktop_changed }}") { throw "Desktop scope mismatch." }
+      - id: metadata
+        name: Read tested Desktop metadata
+        shell: powershell
+        run: |
+          [array]$metadataFiles = @(Get-ChildItem "$env:RUNNER_TEMP\candidate\BAP-Setup-*.metadata.json" -File)
+          if ($metadataFiles.Count -ne 1) { throw "Expected exactly one Desktop metadata file; found $($metadataFiles.Count)." }
+          $metadata = Get-Content -LiteralPath $metadataFiles[0].FullName -Raw | ConvertFrom-Json
+          "version=$($metadata.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha256=$($metadata.sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Upload verification diagnostics
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bap-cd-verification-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}\candidate\delivery-manifest.json
+            ${{ runner.temp }}\candidate\test-summary.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Write verification summary
+        if: always()
+        shell: powershell
+        run: |
+          "## Candidate verification`n- Result: ${{ job.status }}`n- Rebuild performed: no" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  promote-backend:
+    name: Promote Backend
+    needs: [resolve, verify]
+    if: needs.resolve.outputs.backend_changed == 'true' && needs.verify.result == 'success'
+    runs-on: windows-latest
+    environment: production-backend
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: bap-candidate-pr-${{ needs.resolve.outputs.pr_number }}
+          path: ${{ runner.temp }}\candidate
+          run-id: ${{ needs.resolve.outputs.ci_run_id }}
+          github-token: ${{ github.token }}
+      - name: Prepare promotion record and SSH key
+        shell: powershell
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.BAP_BACKEND_SSH_PRIVATE_KEY }}
+        run: |
+          $manifest = Get-Content "$env:RUNNER_TEMP\candidate\delivery-manifest.json" -Raw | ConvertFrom-Json
+          $record = [ordered]@{
+            project = "BAP"
+            master_commit_sha = "${{ github.sha }}"
+            pr_number = [int]"${{ needs.resolve.outputs.pr_number }}"
+            ci_workflow_run_id = [long]"${{ needs.resolve.outputs.ci_run_id }}"
+            source_tree_sha = "${{ needs.resolve.outputs.source_tree_sha }}"
+            backend_sha256 = $manifest.backend.sha256
+            desktop_sha256 = $manifest.desktop.sha256
+            backend_changed = $manifest.backend_changed
+            desktop_changed = $manifest.desktop_changed
+            database_revision = "0002_app_release_source_tree_sha"
+            promoted_at = [DateTime]::UtcNow.ToString("o")
+            backend_result = "pending"
+            desktop_result = if ($manifest.desktop_changed) { "pending" } else { "not_selected" }
+          }
+          $record | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\candidate\promotion-record.json" -Encoding utf8
+          $key = "$env:RUNNER_TEMP\bap-production.key"
+          [IO.File]::WriteAllText($key, $env:SSH_PRIVATE_KEY)
+          icacls $key /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
+      - name: Upload and deploy the tested Backend Artifact
+        shell: powershell
+        env:
+          HOST: ${{ vars.BAP_BACKEND_HOST }}
+          USER: ${{ vars.BAP_BACKEND_USER }}
+          PORT: ${{ vars.BAP_BACKEND_SSH_PORT }}
+        run: |
+          $candidate = "$env:RUNNER_TEMP\candidate"
+          $artifact = Join-Path $candidate "${{ needs.verify.outputs.backend_filename }}"
+          $checksum = $artifact + ".sha256"
+          $ssh = "C:\Windows\System32\OpenSSH\ssh.exe"
+          $scp = "C:\Windows\System32\OpenSSH\scp.exe"
+          $common = @("-i", "$env:RUNNER_TEMP\bap-production.key", "-P", $env:PORT, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL")
+          & $scp @common $artifact $checksum "$candidate\promotion-record.json" "$env:USER@$env:HOST`:C:/BAP/incoming/"
+          if ($LASTEXITCODE -ne 0) { throw "SCP upload failed." }
+          $remoteCommand = 'C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\BAP\bootstrap\Bootstrap-BapBackendCandidate.ps1' +
+            ' -ArtifactPath C:\BAP\incoming\' + [IO.Path]::GetFileName($artifact) +
+            ' -ChecksumPath C:\BAP\incoming\' + [IO.Path]::GetFileName($checksum) +
+            ' -ExpectedSourceTreeSha ${{ needs.resolve.outputs.source_tree_sha }}' +
+            ' -MasterCommitSha ${{ github.sha }}' +
+            ' -PromotionRecordPath C:\BAP\incoming\promotion-record.json'
+          & $ssh -i "$env:RUNNER_TEMP\bap-production.key" -p $env:PORT -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL "$env:USER@$env:HOST" $remoteCommand
+          if ($LASTEXITCODE -ne 0) { throw "Backend promotion failed." }
+          Invoke-RestMethod -Uri "https://imuapp.lab2312.cs.nthu.edu.tw/health" -TimeoutSec 30 | Out-Null
+      - name: Remove SSH key
+        if: always()
+        shell: powershell
+        run: Remove-Item -LiteralPath "$env:RUNNER_TEMP\bap-production.key" -Force -ErrorAction SilentlyContinue
+      - name: Write Backend summary
+        if: always()
+        shell: powershell
+        run: |
+          "## Backend promotion`n- Result: ${{ job.status }}`n- Master: ${{ github.sha }}`n- Source Tree: ${{ needs.resolve.outputs.source_tree_sha }}" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  release-desktop:
+    name: Publish Desktop Release
+    needs: [resolve, verify, promote-backend]
+    if: >-
+      always() &&
+      needs.verify.result == 'success' &&
+      needs.resolve.outputs.desktop_changed == 'true' &&
+      (needs.resolve.outputs.backend_changed != 'true' || needs.promote-backend.result == 'success')
+    runs-on: windows-latest
+    environment: production-backend
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: bap-candidate-pr-${{ needs.resolve.outputs.pr_number }}
+          path: ${{ runner.temp }}\candidate
+          run-id: ${{ needs.resolve.outputs.ci_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reject a duplicate Desktop version
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
+          gh release view $tag --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Desktop version tag already exists: $tag" }
+      - name: Create draft Release from the tested Installer
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
+          $installer = "$env:RUNNER_TEMP\candidate\${{ needs.verify.outputs.desktop_filename }}"
+          gh release create $tag $installer ($installer + ".sha256") --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "BAP Desktop ${{ needs.verify.outputs.desktop_version }}" --notes "Tested Source Tree SHA: ${{ needs.resolve.outputs.source_tree_sha }}" --draft
+      - name: Register update metadata and publish Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SSH_PRIVATE_KEY: ${{ secrets.BAP_BACKEND_SSH_PRIVATE_KEY }}
+          HOST: ${{ vars.BAP_BACKEND_HOST }}
+          USER: ${{ vars.BAP_BACKEND_USER }}
+          PORT: ${{ vars.BAP_BACKEND_SSH_PORT }}
+        run: |
+          $key = "$env:RUNNER_TEMP\bap-production.key"
+          [IO.File]::WriteAllText($key, $env:SSH_PRIVATE_KEY)
+          icacls $key /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
+          $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/${{ needs.verify.outputs.desktop_filename }}"
+          $command = "C:\BAP\current\.venv\Scripts\python.exe -m bap_backend.tools.publish_desktop_release --platform windows --version ${{ needs.verify.outputs.desktop_version }} --download-url $url --sha256 ${{ needs.verify.outputs.desktop_sha256 }} --source-tree-sha ${{ needs.resolve.outputs.source_tree_sha }}"
+          & "C:\Windows\System32\OpenSSH\ssh.exe" -i $key -p $env:PORT -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL "$env:USER@$env:HOST" $command
+          if ($LASTEXITCODE -ne 0) { throw "Writing app_releases failed; the GitHub Release remains a draft." }
+          gh release edit $tag --repo "${{ github.repository }}" --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "Publishing the GitHub Release failed." }
+      - name: Remove SSH key
+        if: always()
+        shell: powershell
+        run: Remove-Item -LiteralPath "$env:RUNNER_TEMP\bap-production.key" -Force -ErrorAction SilentlyContinue
+
+  delivery-gate:
+    name: Delivery Gate
+    if: always()
+    needs: [resolve, verify, promote-backend, release-desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce routed delivery result
+        env:
+          DOCS_ONLY: ${{ needs.resolve.outputs.docs_only }}
+          BACKEND_CHANGED: ${{ needs.resolve.outputs.backend_changed }}
+          DESKTOP_CHANGED: ${{ needs.resolve.outputs.desktop_changed }}
+          VERIFY: ${{ needs.verify.result }}
+          BACKEND: ${{ needs.promote-backend.result }}
+          DESKTOP: ${{ needs.release-desktop.result }}
+        run: |
+          if [ "$DOCS_ONLY" = "true" ]; then exit 0; fi
+          if [ "$VERIFY" != "success" ]; then exit 1; fi
+          if [ "$BACKEND_CHANGED" = "true" ] && [ "$BACKEND" != "success" ]; then exit 1; fi
+          if [ "$DESKTOP_CHANGED" = "true" ] && [ "$DESKTOP" != "success" ]; then exit 1; fi
+          echo "All selected delivery routes passed."

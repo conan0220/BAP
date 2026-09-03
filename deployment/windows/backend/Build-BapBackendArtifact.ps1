@@ -1,79 +1,85 @@
 [CmdletBinding()]
 param(
     [string]$CommitSha = "HEAD",
+    [string]$SourceTreeSha,
     [string]$OutputDirectory,
-    [string]$GitPath = "C:\Program Files\Git\cmd\git.exe",
-    [string]$UvPath = "C:\Users\user\.local\bin\uv.exe",
-    [switch]$SkipTests
+    [string]$PythonPath,
+    [string]$GitPath = "C:\Program Files\Git\cmd\git.exe"
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Common-BapDeployment.ps1")
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
-if (-not $OutputDirectory) { $OutputDirectory = Join-Path $RepoRoot "dist" }
-if (-not (Test-Path -LiteralPath $GitPath -PathType Leaf)) { throw "Git not found: $GitPath" }
-if (-not (Test-Path -LiteralPath $UvPath -PathType Leaf)) { throw "uv not found: $UvPath" }
+if (-not $OutputDirectory) {
+    $OutputDirectory = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP "bap-candidate" } else { Join-Path $RepoRoot "dist" }
+}
+if (-not $PythonPath) { $PythonPath = Join-Path $RepoRoot ".venv\Scripts\python.exe" }
+foreach ($Tool in @($GitPath, $PythonPath)) {
+    if (-not (Test-Path -LiteralPath $Tool -PathType Leaf)) { throw "Required tool not found: $Tool" }
+}
 
-$FullSha = (& $GitPath -C $RepoRoot rev-parse "$CommitSha^{commit}").Trim().ToLowerInvariant()
-if ($LASTEXITCODE -ne 0 -or $FullSha -notmatch "^[0-9a-f]{40}$") { throw "Commit SHA is invalid." }
+$CommitSha = (& $GitPath -C $RepoRoot rev-parse "$CommitSha^{commit}").Trim().ToLowerInvariant()
+if ($LASTEXITCODE -ne 0 -or $CommitSha -notmatch "^[0-9a-f]{40}$") { throw "Commit SHA is invalid." }
+$ActualTree = (& $GitPath -C $RepoRoot rev-parse "$CommitSha^{tree}").Trim().ToLowerInvariant()
+if ($LASTEXITCODE -ne 0 -or $ActualTree -notmatch "^[0-9a-f]{40}$") { throw "Source Tree SHA is invalid." }
+if ($SourceTreeSha -and $SourceTreeSha.ToLowerInvariant() -ne $ActualTree) {
+    throw "Provided Source Tree SHA does not match the selected commit."
+}
+$SourceTreeSha = $ActualTree
+
 $TempRoot = Join-Path $env:TEMP ("bap-backend-build-" + [Guid]::NewGuid().ToString("N"))
 $SnapshotZip = Join-Path $TempRoot "snapshot.zip"
 $Snapshot = Join-Path $TempRoot "snapshot"
 $Stage = Join-Path $TempRoot "artifact"
+$RuntimeScripts = @(
+    "Common-BapDeployment.ps1",
+    "Deploy-BapBackendRelease.ps1",
+    "Run-BapBackendScheduledTask.ps1",
+    "Rollback-BapBackendRelease.ps1",
+    "Get-BapBackendStatus.ps1",
+    "Test-BapBackendHealth.ps1"
+)
 
 try {
     New-Item -ItemType Directory -Path $Snapshot, $Stage, $OutputDirectory -Force | Out-Null
     $Inputs = @(
-        "bap_backend", "bap_common", "migrations", "tests/backend", "deployment/windows/backend",
+        "bap_backend", "bap_common", "migrations", "deployment/windows/backend",
         "alembic.ini", "pyproject.toml", "uv.lock", ".python-version"
     )
-    & $GitPath -C $RepoRoot archive --format=zip --output=$SnapshotZip $FullSha -- $Inputs
+    & $GitPath -C $RepoRoot archive --format=zip --output=$SnapshotZip $CommitSha -- $Inputs
     if ($LASTEXITCODE -ne 0) { throw "Unable to create the clean Git snapshot." }
     Expand-Archive -LiteralPath $SnapshotZip -DestinationPath $Snapshot
-
-    if (-not $SkipTests) {
-        & $UvPath sync --directory $Snapshot --frozen --extra backend --group dev --no-extra desktop --no-extra packaging
-        if ($LASTEXITCODE -ne 0) { throw "Unable to install locked Backend test dependencies." }
-        $SnapshotPython = Join-Path $Snapshot ".venv\Scripts\python.exe"
-        $BackendTests = Join-Path $Snapshot "tests\backend"
-        $PytestTemp = Join-Path $TempRoot "pytest-temp"
-        New-Item -ItemType Directory -Path $PytestTemp -Force | Out-Null
-        $PreviousPluginAutoload = $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD
-        $TestExitCode = 1
-        Push-Location $Snapshot
-        try {
-            $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
-            & $SnapshotPython -m pytest --confcutdir=$BackendTests --basetemp=$PytestTemp $BackendTests -q
-            $TestExitCode = $LASTEXITCODE
-        } finally {
-            Pop-Location
-            if ($null -eq $PreviousPluginAutoload) {
-                Remove-Item Env:PYTEST_DISABLE_PLUGIN_AUTOLOAD -ErrorAction SilentlyContinue
-            } else {
-                $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = $PreviousPluginAutoload
-            }
-        }
-        if ($TestExitCode -ne 0) { throw "Backend tests failed in the clean Git snapshot." }
-    }
 
     foreach ($Path in @("bap_backend", "bap_common", "migrations", "alembic.ini", "pyproject.toml", "uv.lock", ".python-version")) {
         Copy-Item -LiteralPath (Join-Path $Snapshot $Path) -Destination (Join-Path $Stage $Path) -Recurse -Force
     }
+    $RuntimeDirectory = Join-Path $Stage "deployment\runtime"
+    New-Item -ItemType Directory -Path $RuntimeDirectory -Force | Out-Null
+    foreach ($Name in $RuntimeScripts) {
+        $Source = Join-Path $Snapshot ("deployment\windows\backend\" + $Name)
+        if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) { throw "Runtime deployment script is missing: $Name" }
+        Copy-Item -LiteralPath $Source -Destination (Join-Path $RuntimeDirectory $Name)
+    }
+
     $Version = (Get-Content -LiteralPath (Join-Path $Stage "bap_backend\VERSION") -Raw).Trim()
     $ManifestPath = Join-Path $Stage "deployment-manifest.json"
-    $ManifestPython = if (Test-Path (Join-Path $Snapshot ".venv\Scripts\python.exe")) {
-        Join-Path $Snapshot ".venv\Scripts\python.exe"
-    } else {
-        Join-Path $RepoRoot ".venv\Scripts\python.exe"
+    $ManifestArgs = @(
+        "-m", "bap_backend.tools.write_deployment_manifest",
+        "--output", $ManifestPath,
+        "--component", "backend",
+        "--commit-sha", $CommitSha,
+        "--source-tree-sha", $SourceTreeSha,
+        "--version", $Version,
+        "--entry-point", "bap_backend.app.main:app",
+        "--alembic-revision", "0002_app_release_source_tree_sha"
+    )
+    foreach ($Path in @("bap_backend", "bap_common", "migrations", "deployment", "alembic.ini", "pyproject.toml", "uv.lock", ".python-version")) {
+        $ManifestArgs += @("--file", $Path)
     }
-    & $ManifestPython -m bap_backend.tools.write_deployment_manifest `
-        --output $ManifestPath --component backend --commit-sha $FullSha --version $Version `
-        --entry-point "bap_backend.app.main:app" --alembic-revision "0001_initial" `
-        --file "bap_backend" --file "bap_common" --file "migrations" --file "alembic.ini" `
-        --file "pyproject.toml" --file "uv.lock" --file ".python-version"
+    & $PythonPath @ManifestArgs
     if ($LASTEXITCODE -ne 0) { throw "Unable to create deployment-manifest.json." }
 
-    $Artifact = Join-Path $OutputDirectory ("bap-backend-" + $FullSha + ".zip")
+    $Artifact = Join-Path $OutputDirectory ("bap-backend-tree-" + $SourceTreeSha + ".zip")
     $Checksum = $Artifact + ".sha256"
     if (Test-Path -LiteralPath $Artifact) { Remove-Item -LiteralPath $Artifact -Force }
     Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $Artifact -CompressionLevel Optimal

@@ -3,6 +3,7 @@ param(
     [string]$Root = "C:\BAP",
     [string]$ExpectedUser = "user",
     [string]$UvPath = "C:\Users\user\.local\bin\uv.exe",
+    [string]$TaskName = "BAPBackend",
     [switch]$SkipHostChecks
 )
 
@@ -17,50 +18,35 @@ if (-not $SkipHostChecks) {
     if (-not (Test-Path -LiteralPath $AuthorizedKeys -PathType Leaf) -or (Get-Item $AuthorizedKeys).Length -eq 0) {
         throw "administrators_authorized_keys is missing or empty."
     }
-    $PublicKeyLines = @(Get-Content -LiteralPath $AuthorizedKeys | Where-Object {
-        $Line = $_.Trim()
-        $Line -and -not $Line.StartsWith("#")
-    })
-    $SupportedPublicKey = @($PublicKeyLines | Where-Object {
-        $_ -match "^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+/=]+(?:\s+.*)?$"
-    })
-    if ($SupportedPublicKey.Count -eq 0) {
-        throw "administrators_authorized_keys does not contain a supported OpenSSH public key."
-    }
-
-    # Windows OpenSSH ignores this file when unrelated accounts can read or
-    # change it. Validate the existing ACL, but do not rewrite host security
-    # settings from this bootstrap script.
-    $AllowedAclSids = @("S-1-5-18", "S-1-5-32-544") # SYSTEM, Administrators
-    $AuthorizedKeysAcl = Get-Acl -LiteralPath $AuthorizedKeys
+    $AllowedAclSids = @("S-1-5-18", "S-1-5-32-544")
     $ObservedAllowSids = @()
-    foreach ($Rule in $AuthorizedKeysAcl.Access) {
-        try {
-            $Sid = $Rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-        }
-        catch {
-            throw "Unable to validate administrators_authorized_keys ACL identity."
-        }
-        if ($Rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) {
+    foreach ($Rule in (Get-Acl -LiteralPath $AuthorizedKeys).Access) {
+        $Sid = $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($Rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow) {
             $ObservedAllowSids += $Sid
-            if ($AllowedAclSids -notcontains $Sid) {
-                throw "administrators_authorized_keys ACL grants access to an unexpected account."
-            }
+            if ($AllowedAclSids -notcontains $Sid) { throw "administrators_authorized_keys ACL grants access to an unexpected account." }
         }
     }
     foreach ($RequiredSid in $AllowedAclSids) {
-        if ($ObservedAllowSids -notcontains $RequiredSid) {
-            throw "administrators_authorized_keys ACL must grant access to SYSTEM and Administrators only."
-        }
+        if ($ObservedAllowSids -notcontains $RequiredSid) { throw "administrators_authorized_keys ACL must grant access to SYSTEM and Administrators only." }
     }
 }
 
-$Directories = @(
-    "releases", "incoming", "config", "data", "logs", "backups", "scripts",
-    "scripts-releases", "bootstrap", "run"
-)
+$Directories = @("releases", "incoming", "config", "data", "logs", "backups", "bootstrap", "run")
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
-foreach ($Directory in $Directories) {
-    New-Item -ItemType Directory -Path (Join-Path $Root $Directory) -Force | Out-Null
+foreach ($Directory in $Directories) { New-Item -ItemType Directory -Path (Join-Path $Root $Directory) -Force | Out-Null }
+
+$BootstrapSource = Join-Path $PSScriptRoot "Bootstrap-BapBackendCandidate.ps1"
+if (Test-Path -LiteralPath $BootstrapSource -PathType Leaf) {
+    Copy-Item -LiteralPath $BootstrapSource -Destination (Join-Path $Root "bootstrap\Bootstrap-BapBackendCandidate.ps1") -Force
 }
-Write-Output "BAP Backend host directories are ready. Existing persistent data was preserved."
+if (-not $SkipHostChecks) {
+    $PowerShell = "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $RunScript = Join-Path $Root "current\deployment\runtime\Run-BapBackendScheduledTask.ps1"
+    $Action = New-ScheduledTaskAction -Execute $PowerShell -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $RunScript + '" -Root "' + $Root + '"') -WorkingDirectory $Root
+    $Trigger = New-ScheduledTaskTrigger -AtStartup
+    $Settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 0)
+    $Principal = New-ScheduledTaskPrincipal -UserId $ExpectedUser -LogonType S4U -RunLevel Highest
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Force | Out-Null
+}
+Write-Output "BAP Backend host and Scheduled Task configuration are ready. Existing persistent data was preserved."

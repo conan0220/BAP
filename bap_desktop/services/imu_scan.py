@@ -182,7 +182,13 @@ def scan_port(
         )
         opened = True
         parser = parser_factory()
-        deadline = started + max(duration_seconds, 0.0)
+        # Opening a real serial port (and scheduling this worker) is setup time,
+        # not part of the requested recording window.  Starting the deadline
+        # here also keeps every concurrently scanned port from losing its whole
+        # sample window when another worker is slow to start.
+        recording_started = clock()
+        result.started_at = recording_started
+        deadline = recording_started + max(duration_seconds, 0.0)
         while clock() < deadline:
             if cancel_event is not None and cancel_event.is_set():
                 result.status = ScanStatus.CANCELLED

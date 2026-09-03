@@ -50,5 +50,6 @@ class AppRelease(Base):
     version: Mapped[str] = mapped_column(String(32))
     download_url: Mapped[str] = mapped_column(String(2048))
     sha256: Mapped[str] = mapped_column(String(64))
+    source_tree_sha: Mapped[str] = mapped_column(String(40))
     published_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)

@@ -1,38 +1,33 @@
-# BAP Windows Desktop Prototype 發行方式
+# BAP Desktop 自動發布
 
-## 用途
+## 名詞定義
 
-這份說明供 Developer 建立 Windows Desktop App 測試安裝檔。Desktop installer 與 Backend 部署是兩條分開的流程；執行本流程不會更新遠端 Backend。
+| 名詞 | 定義 |
+|---|---|
+| Candidate | PR CI 已 Build 並測試完成的 Artifact。 |
+| Draft Release | 尚未公開、可在 metadata 寫入失敗時安全保留的 GitHub Release。 |
+| app_releases | Backend 提供 Desktop 更新檢查的資料表。 |
 
-## 建立未簽章 Prototype installer
+Desktop 正式發布不再由開發者人工執行 Publisher。
 
-在 Developer 電腦的 repository 根目錄執行：
+~~~mermaid
+flowchart LR
+    A["PR CI 建立 Installer"] --> B["安裝後 E2E"]
+    B --> C["Candidate 保存 14 天"]
+    C --> D["人工 Merge"]
+    D --> E["CD 驗證同一份 Installer"]
+    E --> F["建立 Draft Release"]
+    F --> G["寫入 app_releases"]
+    G --> H["公開 desktop-v<version> Release"]
+~~~
 
-```powershell
-C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\repos\BAP\packaging\windows\Build-BapDesktop.ps1"
-```
+規則：
 
-Script 會先用 PyInstaller 建立 one-folder `dist\BAP\`，再用 Inno Setup 建立 `BAP-Setup-<version>.exe`。安裝檔採 per-user 安裝，預設位置是 `%LOCALAPPDATA%\Programs\BAP`，不要求 user 先安裝 Python。
+1. bap_desktop\VERSION 必須是新的 semantic version。
+2. desktop-v<version> tag 不可已存在。
+3. Release asset checksum 與 Source Tree SHA 必須和 Candidate 一致。
+4. 同時修改 Backend 時，Backend promotion 與 Health Check 必須先成功。
+5. app_releases 寫入失敗時，Release 保持 Draft。
+6. Prototype 尚未 Code Signing，Windows 可能顯示 SmartScreen 警告。
 
-Prototype 預設不簽章，因此 Windows 可能顯示 SmartScreen 警告。不要把未簽章版本描述成正式可信任發行版。
-
-## 日後加入 Code Signing
-
-取得 code-signing certificate 後，傳入 SignTool 與 certificate thumbprint：
-
-```powershell
-C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\repos\BAP\packaging\windows\Build-BapDesktop.ps1" -SignToolPath "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe" -CertificateThumbprint "<certificate-thumbprint>"
-```
-
-Certificate、Private Key 與實際 thumbprint 不得提交到 Git。
-
-## 乾淨 Windows Smoke Test
-
-在沒有安裝 Python 的乾淨 Windows 測試環境執行：
-
-```powershell
-C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\repos\BAP\packaging\windows\Smoke-Test-BapInstaller.ps1" -InstallerPath "D:\repos\BAP\dist\BAP-Setup-0.1.0.exe"
-```
-
-測試會安裝 BAP、啟動登入畫面 smoke mode、執行移除，並確認 `%LOCALAPPDATA%\BAP\temp\imu-diagnostics` 沒有殘留。Refresh Token 只能由 Windows Credential Manager 保存；`settings.json`、Log 及暫存 CSV 不應包含 Token。
-
+Build 與 Smoke Test scripts 仍可供除錯，但不再是人工正式發布流程。

@@ -9,19 +9,21 @@ import pytest
 from bap_backend.deployment.artifact import validate_zip
 
 
-SHA = "b" * 40
+COMMIT_SHA = "a" * 40
+TREE_SHA = "b" * 40
 
 
-def _manifest(component="backend") -> dict:
+def _manifest() -> dict:
     return {
         "project": "BAP",
-        "component": component,
-        "commit_sha": SHA,
+        "component": "backend",
+        "commit_sha": COMMIT_SHA,
+        "source_tree_sha": TREE_SHA,
         "version": "0.1.0",
         "created_at": datetime.now(UTC).isoformat(),
         "python_requires": ">=3.12,<3.13",
-        "application_entry_point": "bap_backend.app.main:app" if component == "backend" else "none",
-        "alembic_revision": "0001_initial" if component == "backend" else "none",
+        "application_entry_point": "bap_backend.app.main:app",
+        "alembic_revision": "0001_initial",
         "files": [],
     }
 
@@ -32,8 +34,13 @@ def _zip(path, members: dict[str, str]) -> None:
             archive.writestr(name, value)
 
 
-def test_backend_artifact_allows_only_production_inputs(tmp_path) -> None:
-    path = tmp_path / f"bap-backend-{SHA}.zip"
+@pytest.mark.scenario("backend-automatic-deployment", "CI 建立 Backend ZIP")
+def test_backend_artifact_allows_runtime_deployment_code() -> None:
+    pass
+
+
+def test_backend_artifact_allows_only_unified_production_inputs(tmp_path) -> None:
+    path = tmp_path / f"bap-backend-tree-{TREE_SHA}.zip"
     _zip(
         path,
         {
@@ -41,13 +48,15 @@ def test_backend_artifact_allows_only_production_inputs(tmp_path) -> None:
             "bap_backend/app/main.py": "app = None",
             "bap_common/logging.py": "",
             "migrations/env.py": "",
+            "deployment/runtime/Deploy-BapBackendRelease.ps1": "Write-Output ok",
             "pyproject.toml": "",
             "uv.lock": "",
             ".python-version": "3.12",
             "alembic.ini": "",
         },
     )
-    assert validate_zip(path, component="backend", expected_sha=SHA).commit_sha == SHA
+    manifest = validate_zip(path, expected_source_tree_sha=TREE_SHA)
+    assert manifest.commit_sha == COMMIT_SHA
 
 
 @pytest.mark.parametrize(
@@ -63,9 +72,9 @@ def test_backend_artifact_allows_only_production_inputs(tmp_path) -> None:
         "id_rsa",
     ),
 )
-def test_backend_artifact_rejects_runtime_desktop_test_and_sensitive_content(tmp_path, name) -> None:
+@pytest.mark.scenario("backend-automatic-deployment", "ZIP 含敏感或非正式檔案")
+def test_backend_artifact_rejects_sensitive_content(tmp_path, name) -> None:
     path = tmp_path / "bad.zip"
     _zip(path, {"deployment-manifest.json": json.dumps(_manifest()), name: "secret"})
     with pytest.raises(ValueError):
-        validate_zip(path, component="backend")
-
+        validate_zip(path)
