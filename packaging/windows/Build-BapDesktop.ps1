@@ -59,7 +59,7 @@ try {
 
     if (-not $SkipInstaller) {
         if (-not (Test-Path -LiteralPath $InnoSetupPath -PathType Leaf)) { throw "Inno Setup was not found: $InnoSetupPath" }
-        $Iss = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bap-installer.iss") -Raw
+        $Iss = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bap-installer.iss") -Raw -Encoding UTF8
         $Iss = $Iss.Replace('#define MyAppVersion "0.1.0"', ('#define MyAppVersion "' + $Version + '"'))
         $Iss = $Iss.Replace('OutputDir=..\..\dist', ('OutputDir=' + $OutputDirectory))
         $Iss = $Iss.Replace('Source: "..\..\dist\BAP\*"', ('Source: "' + $AppDirectory + '\*"'))

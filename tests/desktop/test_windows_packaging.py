@@ -70,6 +70,7 @@ def test_desktop_build_reads_the_single_project_version_source() -> None:
     assert 'Join-Path $RepoRoot "pyproject.toml"' in build_script
     assert "tomllib" in build_script
     assert "bap_desktop\\VERSION" not in build_script
+    assert 'bap-installer.iss") -Raw -Encoding UTF8' in build_script
 
 
 def test_refresh_token_storage_is_separate_from_non_sensitive_settings() -> None:
