@@ -16,7 +16,7 @@ if (-not (Test-Path -LiteralPath $PreviousRelease -PathType Container)) { throw 
 
 if (-not $SkipScheduledTaskForTesting) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue }
 $Current = Join-Path $Root "current"
-if (Test-Path -LiteralPath $Current) { Remove-Item -LiteralPath $Current -Force }
+Remove-BapCurrentJunction -Root $Root
 & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $PreviousRelease | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Unable to restore the previous current junction." }
 

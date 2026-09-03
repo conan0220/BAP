@@ -73,8 +73,17 @@ try {
     if ($OldRelease) {
         Set-Content -LiteralPath (Join-Path $Root "run\previous-release.txt") -Value $OldRelease -Encoding Ascii
     }
-    if (-not $SkipScheduledTaskForTesting -and (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
-        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $ScheduledTask = if (-not $SkipScheduledTaskForTesting) {
+        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    } else {
+        $null
+    }
+    if ($ScheduledTask) {
+        # On some Windows Server hosts, Stop-ScheduledTask can block even when
+        # the task is already Ready.  Only request a stop for a running task.
+        if ($ScheduledTask.State -eq "Running") {
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        }
         for ($Attempt = 0; $Attempt -lt 15; $Attempt++) {
             if (-not (Get-NetTCPConnection -LocalPort 12345 -State Listen -ErrorAction SilentlyContinue)) { break }
             Start-Sleep -Seconds 1
@@ -99,7 +108,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Alembic migration failed." }
 
     $Current = Join-Path $Root "current"
-    if (Test-Path -LiteralPath $Current) { Remove-Item -LiteralPath $Current -Force }
+    Remove-BapCurrentJunction -Root $Root
     & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $Release | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Unable to switch the current junction." }
 
@@ -124,7 +133,7 @@ try {
     try {
         if ($OldRelease) {
             $Current = Join-Path $Root "current"
-            if (Test-Path -LiteralPath $Current) { Remove-Item -LiteralPath $Current -Force }
+            Remove-BapCurrentJunction -Root $Root
             & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $OldRelease | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Unable to restore the previous current junction." }
             if ($Backup) { Copy-Item -LiteralPath $Backup -Destination (Join-Path $Root "data\bap.db") -Force }

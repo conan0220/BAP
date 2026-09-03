@@ -260,6 +260,21 @@ def test_deploy_orders_backup_migration_cutover_task_and_health_with_rollback() 
     assert "Unable to switch the current junction." in deploy
     assert "Backend health check failed." in deploy
     assert "Deployment failed and rollback also failed." in deploy
+    assert '$ScheduledTask.State -eq "Running"' in deploy
+    assert "Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop" in deploy
+    assert "Remove-BapCurrentJunction -Root $Root" in deploy
+
+
+def test_current_junction_removal_uses_dotnet_and_validates_release_target() -> None:
+    common = (SCRIPTS / "Common-BapDeployment.ps1").read_text(encoding="utf-8")
+    rollback = (SCRIPTS / "Rollback-BapBackendRelease.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "function Remove-BapCurrentJunction" in common
+    assert "[IO.Directory]::Delete($Current)" in common
+    assert "Current junction target is outside the releases directory." in common
+    assert "Remove-Item -LiteralPath $Current" not in common
+    assert "Remove-BapCurrentJunction -Root $Root" in rollback
 
 
 @pytest.mark.scenario("backend-automatic-deployment", "管理者查詢狀態")
