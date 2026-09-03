@@ -37,9 +37,13 @@ def classify_paths(paths: list[str]) -> ChangeScope:
         only_docs = only_docs and is_doc
         if is_doc:
             continue
-        if root in _BACKEND_ROOTS or text.startswith("deployment/windows/backend/"):
+        if (
+            root in _BACKEND_ROOTS
+            or text.startswith("deployment/windows/backend/")
+            or text.startswith("tests/backend/")
+        ):
             backend = True
-        elif root in _DESKTOP_ROOTS:
+        elif root in _DESKTOP_ROOTS or text.startswith("tests/desktop/"):
             desktop = True
         elif root in _SHARED_ROOTS or text in _SHARED_FILES:
             backend = desktop = True

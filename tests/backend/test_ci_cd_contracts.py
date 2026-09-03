@@ -27,7 +27,9 @@ TREE = "c" * 40
         (["bap_desktop/app.py"], ChangeScope(False, False, True)),
         (["bap_common/rules.py"], ChangeScope(False, True, True)),
         (["deployment/windows/backend/deploy.ps1"], ChangeScope(False, True, False)),
+        (["tests/backend/test_deploy.py"], ChangeScope(False, True, False)),
         (["packaging/windows/build.ps1"], ChangeScope(False, False, True)),
+        (["tests/desktop/test_app.py"], ChangeScope(False, False, True)),
         ([".github/workflows/ci.yml"], ChangeScope(False, True, True)),
     ),
 )
