@@ -260,6 +260,8 @@ def test_deploy_orders_backup_migration_cutover_task_and_health_with_rollback() 
     assert "Unable to switch the current junction." in deploy
     assert "Backend health check failed." in deploy
     assert "Deployment failed and rollback also failed." in deploy
+    assert '$ScheduledTask.State -eq "Running"' in deploy
+    assert "Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop" in deploy
 
 
 @pytest.mark.scenario("backend-automatic-deployment", "管理者查詢狀態")
