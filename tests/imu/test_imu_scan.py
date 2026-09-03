@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
-from threading import Event
+from threading import Barrier, Event
 
 import pytest
 
@@ -54,24 +53,37 @@ class FakeAdapter:
         return value
 
 
+class CoordinatedAdapter(FakeAdapter):
+    """Requires every fake port worker to reach open() before any may continue."""
+
+    def __init__(self, connections: dict[str, FakeConnection | BaseException]):
+        super().__init__(connections)
+        self.open_barrier = Barrier(len(connections))
+
+    def open(self, port: str, *, baud_rate: int, timeout: float):
+        connection = super().open(port, baud_rate=baud_rate, timeout=timeout)
+        self.open_barrier.wait(timeout=1)
+        return connection
+
+
 @pytest.mark.scenario("imu-connection-diagnostics", "電腦有多個 Port")
 @pytest.mark.scenario("imu-connection-diagnostics", "成功解析有線 IMU")
 @pytest.mark.scenario("imu-connection-diagnostics", "成功解析無線接收器資料")
 @pytest.mark.scenario("imu-connection-diagnostics", "Manufacturer 可以取得")
 @pytest.mark.scenario("imu-connection-diagnostics", "Manufacturer 無法取得")
 def test_scans_ports_concurrently_with_fixed_baud_and_manufacturer(hi91_frame) -> None:
-    adapter = FakeAdapter(
+    adapter = CoordinatedAdapter(
         {
             "COM1": FakeConnection([hi91_frame]),
             "COM2": FakeConnection([build_gateway_frame()]),
         }
     )
-    started = time.perf_counter()
     results = scan_all_ports(adapter, duration_seconds=0.03)
-    elapsed = time.perf_counter() - started
 
-    assert elapsed < 0.055
-    assert adapter.open_calls == [("COM1", DEFAULT_BAUD_RATE), ("COM2", DEFAULT_BAUD_RATE)]
+    assert set(adapter.open_calls) == {
+        ("COM1", DEFAULT_BAUD_RATE),
+        ("COM2", DEFAULT_BAUD_RATE),
+    }
     assert results[0].manufacturer == "ANROT"
     assert results[1].manufacturer is None
     assert all(result.status is ScanStatus.CONNECTED for result in results)
