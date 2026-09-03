@@ -66,7 +66,7 @@
 - [x] 6.6 保留並調整 `Test-BapBackendHealth.ps1`，部署後同時驗證 localhost 與公開 HTTPS。
 - [x] 6.7 改寫 `Rollback-BapBackendRelease.ps1`，自動停止 Task、還原 Release／Database、重新啟動並重跑 Health。
 - [x] 6.8 建立暫存 `C:\BAP` contract tests，涵蓋 checksum、manifest、unexpected file、重複部署、Migration failure、Junction failure、Task failure、Health failure 與 Rollback。
-- [ ] 6.9 在遠端完成 SSH、Scheduled Task 啟停、SSH 結束後持續運行、Backend-only deployment、local／public Health 與 Promotion record E2E；不得為測試主動重新開機，開機 Trigger 只做設定與 contract 驗證。
+- [x] 6.9 在遠端完成 SSH、Scheduled Task 啟停、SSH 結束後持續運行、Backend-only deployment、local／public Health 與 Promotion record E2E；不得為測試主動重新開機，開機 Trigger 只做設定與 contract 驗證。
 
 ## 7. Desktop Release 與 Backend-first Gate
 
@@ -93,7 +93,7 @@
 - [x] 9.4 Scheduled Task 驗證完成後移除 `Start-BapBackend.ps1` 與 `Stop-BapBackend.ps1`。
 - [x] 9.5 移除或重寫要求本機 Publish、獨立 script Artifact、前景 Terminal或禁止 GitHub Production Deployment 的舊測試。
 - [x] 9.6 清理 repository 本機 `dist\`、`build\`、`bap.egg-info\`、`.pytest_cache\`、`__pycache__\` 舊產生物，但保留 `.venv`。
-- [ ] 9.7 清理遠端舊 `scripts-releases\`、`scripts\` Junction、`Update-BapDeploymentScripts.ps1`、Deployment Scripts ZIP 與 PID 檔，保留 config、data、logs、backups、releases、current、incoming。
+- [x] 9.7 清理遠端舊 `scripts-releases\`、`scripts\` Junction、`Update-BapDeploymentScripts.ps1`、Deployment Scripts ZIP 與 PID 檔，保留 config、data、logs、backups、releases、current、incoming。
 - [x] 9.8 建立 repository contract test，確認被淘汰的 Workflow、Scripts、文件指令與相反 assertions 不再出現。
 - [x] 9.9 驗證根目錄沒有正式流程會讀取本機 `dist\` 或要求開發者執行 SCP／SSH。
 
@@ -101,13 +101,13 @@
 
 - [x] 10.1 為 `pull-request-ci` 的每個 Scenario 建立 automated／contract test與 `pytest.mark.scenario` 對應。
 - [x] 10.2 為 `component-delivery-routing` 的每個 Scenario 建立 automated／contract test與 marker。
-- [ ] 10.3 為 `backend-automatic-deployment` 的每個 Scenario 建立 contract／遠端 E2E 與 marker。
+- [x] 10.3 為 `backend-automatic-deployment` 的每個 Scenario 建立 contract／遠端 E2E 與 marker。
 - [x] 10.4 為 `desktop-automatic-release` 的每個 Scenario 建立 automated／contract test與 marker。
 - [x] 10.5 為 `ci-cd-status-reporting` 的每個 Scenario 建立 automated／contract test與 marker。
 - [x] 10.6 建立 Scenario coverage checker，缺少測試 marker 時使 CI 失敗。
 - [x] 10.7 執行 OpenSpec strict validation、pytest、Workflow YAML／contract、API integration、Qt E2E、packaging、deployment-interface 與 Scenario coverage。
 - [x] 10.8 建立測試 PR，驗證 Windows Runner 1 只 Build 一次、由 Artifact 安裝並上傳 Candidate。
-- [ ] 10.9 人工 Merge 測試 PR，驗證 Windows Runner 2 下載同一 Candidate、不重新 Build，並正確執行 scope routing。
+- [x] 10.9 人工 Merge 測試 PR，驗證 Windows Runner 2 下載同一 Candidate、不重新 Build，並正確執行 scope routing。
 - [ ] 10.10 分別驗證 backend-only、desktop-only、shared 與 docs-only 流程。
 - [ ] 10.11 故意造成 checksum／Tree／scope mismatch 與 Production health failure，驗證 fail closed、Rollback、Last Known Good 與 Email 通知。
 - [ ] 10.12 完成一次 Cutover 後的全新 PR→CI→人工 Merge→CD E2E，確認舊 Script 已移除且開發者 workspace 不產生正式 Artifact。
