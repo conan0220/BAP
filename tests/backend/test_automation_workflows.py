@@ -154,7 +154,8 @@ def test_backend_promotion_uses_environment_ssh_and_public_health_gate() -> None
 def test_desktop_release_uses_tested_asset_draft_and_update_metadata() -> None:
     text = CD.read_text(encoding="utf-8")
     assert "desktop-v${{ needs.verify.outputs.desktop_version }}" in text
-    assert "gh release view" in text
+    assert "/releases/tags/$encodedTag" in text
+    assert "[int]$response.StatusCode -ne 404" in text
     assert "gh release create" in text and "--draft" in text
     assert "publish_desktop_release" in text
     assert "--source-tree-sha" in text
