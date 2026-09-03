@@ -27,7 +27,15 @@ if (-not $SourceTreeSha) {
 }
 if ($SourceTreeSha -notmatch "^[0-9a-f]{40}$") { throw "Source Tree SHA is invalid." }
 
-$Version = (Get-Content -LiteralPath (Join-Path $RepoRoot "bap_desktop\VERSION") -Raw).Trim()
+$PyProjectPath = Join-Path $RepoRoot "pyproject.toml"
+$VersionOutput = & $PythonPath -c "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['project']['version'])" $PyProjectPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Desktop version could not be read from pyproject.toml."
+}
+$Version = ([string]$VersionOutput).Trim()
+if ($Version -notmatch "^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$") {
+    throw "Desktop version could not be read from pyproject.toml."
+}
 $AppDist = Join-Path $WorkDirectory "app"
 $PyInstallerWork = Join-Path $WorkDirectory "pyinstaller"
 $GeneratedIss = Join-Path $WorkDirectory "bap-installer.generated.iss"

@@ -63,6 +63,15 @@ def test_desktop_candidate_is_built_in_pr_and_only_promoted_in_cd() -> None:
     assert "gh release create" in cd
 
 
+def test_desktop_build_reads_the_single_project_version_source() -> None:
+    build_script = (ROOT / "packaging/windows/Build-BapDesktop.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert 'Join-Path $RepoRoot "pyproject.toml"' in build_script
+    assert "tomllib" in build_script
+    assert "bap_desktop\\VERSION" not in build_script
+
+
 def test_refresh_token_storage_is_separate_from_non_sensitive_settings() -> None:
     settings_source = (ROOT / "bap_desktop/settings.py").read_text(encoding="utf-8").lower()
     credentials_source = (ROOT / "bap_desktop/services/credential_store.py").read_text(encoding="utf-8")
