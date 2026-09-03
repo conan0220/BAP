@@ -11,7 +11,7 @@ from bap_desktop import APP_NAME, PRODUCT_NAME, __version__
 def _run_api_e2e() -> int:
     """Exercise the packaged clients against a real CI Backend over HTTP."""
 
-    from bap_desktop.api_client import AuthApiClient, ReleaseApiClient
+    from bap_desktop.api_client import ApiRejectedError, AuthApiClient, ReleaseApiClient
     from bap_desktop.settings import DesktopSettings
 
     settings = DesktopSettings()

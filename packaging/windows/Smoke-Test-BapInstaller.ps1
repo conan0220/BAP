@@ -11,20 +11,34 @@ $DataDir = Join-Path $env:LOCALAPPDATA "BAP"
 $AppExe = Join-Path $InstallDir "BAP.exe"
 $Uninstaller = Join-Path $InstallDir "unins000.exe"
 
+function Invoke-BapAppCheck {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $Process = Start-Process -FilePath $AppExe -ArgumentList $Arguments -PassThru
+    if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        throw "$Label timed out after $TimeoutSeconds seconds."
+    }
+    $Process.Refresh()
+    if ($Process.ExitCode -ne 0) { throw "$Label exited with $($Process.ExitCode)." }
+}
+
 try {
     $Install = Start-Process -FilePath $InstallerPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER" -Wait -PassThru
     if ($Install.ExitCode -ne 0) { throw "BAP installer exited with $($Install.ExitCode)." }
     if (-not (Test-Path -LiteralPath $AppExe -PathType Leaf)) { throw "BAP.exe was not installed." }
 
-    $Smoke = Start-Process -FilePath $AppExe -ArgumentList "--smoke-test" -Wait -PassThru
-    if ($Smoke.ExitCode -ne 0) { throw "BAP launch smoke test exited with $($Smoke.ExitCode)." }
+    Invoke-BapAppCheck -Arguments @("--smoke-test") -Label "BAP launch smoke test" -TimeoutSeconds 60
 
     if ($ApiBaseUrl) {
         $PreviousApiBaseUrl = $env:BAP_API_BASE_URL
         try {
             $env:BAP_API_BASE_URL = $ApiBaseUrl
-            $E2E = Start-Process -FilePath $AppExe -ArgumentList "--api-e2e-test" -Wait -PassThru
-            if ($E2E.ExitCode -ne 0) { throw "Installed BAP API E2E exited with $($E2E.ExitCode)." }
+            Invoke-BapAppCheck -Arguments @("--api-e2e-test") -Label "Installed BAP API E2E" -TimeoutSeconds 120
         } finally {
             $env:BAP_API_BASE_URL = $PreviousApiBaseUrl
         }

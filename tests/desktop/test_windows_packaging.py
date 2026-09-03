@@ -48,6 +48,12 @@ def test_inno_setup_is_per_user_and_removes_only_managed_temporary_csv_area() ->
     assert "settings.json" not in installer
     assert "Credential Manager" not in installer
 
+    smoke_test = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "WaitForExit($TimeoutSeconds * 1000)" in smoke_test
+    assert 'Arguments @("--api-e2e-test")' in smoke_test
+
 
 def test_desktop_candidate_is_built_in_pr_and_only_promoted_in_cd() -> None:
     guide = (ROOT / "docs/guides/desktop-release.md").read_text(encoding="utf-8")
