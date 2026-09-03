@@ -130,7 +130,9 @@ jobs:
         name: Read tested Desktop metadata
         shell: powershell
         run: |
-          $metadata = Get-ChildItem "$env:RUNNER_TEMP\candidate\BAP-Setup-*.metadata.json" | Select-Object -Single | Get-Content -Raw | ConvertFrom-Json
+          [array]$metadataFiles = @(Get-ChildItem "$env:RUNNER_TEMP\candidate\BAP-Setup-*.metadata.json" -File)
+          if ($metadataFiles.Count -ne 1) { throw "Expected exactly one Desktop metadata file; found $($metadataFiles.Count)." }
+          $metadata = Get-Content -LiteralPath $metadataFiles[0].FullName -Raw | ConvertFrom-Json
           "version=$($metadata.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "sha256=$($metadata.sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - name: Upload verification diagnostics

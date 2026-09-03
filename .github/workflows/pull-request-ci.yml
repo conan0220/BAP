@@ -89,8 +89,12 @@ jobs:
       - name: Test unpacked Backend and installed Desktop
         shell: powershell
         run: |
-          $backend = Get-ChildItem "$env:RUNNER_TEMP\bap-candidate\bap-backend-tree-*.zip" | Select-Object -Single
-          $installer = Get-ChildItem "$env:RUNNER_TEMP\bap-candidate\BAP-Setup-*.exe" | Select-Object -Single
+          [array]$backendFiles = @(Get-ChildItem "$env:RUNNER_TEMP\bap-candidate\bap-backend-tree-*.zip" -File)
+          [array]$installerFiles = @(Get-ChildItem "$env:RUNNER_TEMP\bap-candidate\BAP-Setup-*.exe" -File)
+          if ($backendFiles.Count -ne 1) { throw "Expected exactly one Backend Artifact; found $($backendFiles.Count)." }
+          if ($installerFiles.Count -ne 1) { throw "Expected exactly one Desktop Installer; found $($installerFiles.Count)." }
+          $backend = $backendFiles[0]
+          $installer = $installerFiles[0]
           .\deployment\ci\Test-BapCandidate.ps1 `
             -BackendArtifact $backend.FullName `
             -BackendChecksum ($backend.FullName + ".sha256") `
@@ -102,8 +106,12 @@ jobs:
         shell: powershell
         run: |
           $candidate = "$env:RUNNER_TEMP\bap-candidate"
-          $backend = Get-ChildItem "$candidate\bap-backend-tree-*.zip" | Select-Object -Single
-          $desktop = Get-ChildItem "$candidate\BAP-Setup-*.exe" | Select-Object -Single
+          [array]$backendFiles = @(Get-ChildItem "$candidate\bap-backend-tree-*.zip" -File)
+          [array]$desktopFiles = @(Get-ChildItem "$candidate\BAP-Setup-*.exe" -File)
+          if ($backendFiles.Count -ne 1) { throw "Expected exactly one Backend Artifact; found $($backendFiles.Count)." }
+          if ($desktopFiles.Count -ne 1) { throw "Expected exactly one Desktop Installer; found $($desktopFiles.Count)." }
+          $backend = $backendFiles[0]
+          $desktop = $desktopFiles[0]
           @{
             source_tests = "passed"
             backend_package = "passed"

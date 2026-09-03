@@ -50,6 +50,9 @@ def test_pr_workflow_builds_installs_and_tests_one_candidate() -> None:
     assert "--api-e2e-test" in (ROOT / "bap_desktop/app.py").read_text(encoding="utf-8")
     assert "bap-candidate-pr-${{ github.event.pull_request.number }}" in text
     assert "retention-days: 14" in text
+    assert "Select-Object -Single" not in text
+    assert "Expected exactly one Backend Artifact" in text
+    assert "Expected exactly one Desktop Installer" in text
 
 
 @pytest.mark.scenario("pull-request-ci", "docs-only PR 不使用 Windows Runner")
