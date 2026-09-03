@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,29 @@ import pytest
 ROOT = Path(__file__).parents[2]
 PR = ROOT / ".github/workflows/pull-request-ci.yml"
 CD = ROOT / ".github/workflows/continuous-delivery.yml"
+
+
+def test_scope_cli_runs_without_installed_project_dependencies() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-m",
+            "bap_backend.tools.delivery_candidate",
+            "--git-path",
+            "git",
+            "scope",
+            "--base",
+            "HEAD~1",
+            "--head",
+            "HEAD",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert '"docs_only"' in result.stdout
 
 
 @pytest.mark.scenario("pull-request-ci", "程式 PR 通過完整 CI")
