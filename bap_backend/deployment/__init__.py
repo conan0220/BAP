@@ -1,6 +1,5 @@
-"""Backend deployment contracts shared by build and validation tools."""
+"""Backend delivery contracts."""
 
-from .manifest import DeploymentManifest
+from .manifest import ArtifactReference, DeliveryManifest, DeploymentManifest, PromotionRecord
 
-__all__ = ["DeploymentManifest"]
-
+__all__ = ["ArtifactReference", "DeliveryManifest", "DeploymentManifest", "PromotionRecord"]

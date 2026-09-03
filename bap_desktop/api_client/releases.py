@@ -17,6 +17,7 @@ class ReleaseData:
     version: str
     download_url: str
     sha256: str
+    source_tree_sha: str
     published_at: datetime
 
 
@@ -41,4 +42,3 @@ class ReleaseApiClient:
             return ReleaseData(**payload)
         except (KeyError, TypeError, ValueError) as error:
             raise ApiRejectedError("更新資訊格式不正確", response.status_code) from error
-

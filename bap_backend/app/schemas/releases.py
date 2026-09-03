@@ -12,4 +12,5 @@ class ReleaseResponse(BaseModel):
     version: str
     download_url: str
     sha256: str
+    source_tree_sha: str
     published_at: datetime

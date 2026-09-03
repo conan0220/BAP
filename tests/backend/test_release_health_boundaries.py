@@ -25,6 +25,7 @@ def test_latest_release_uses_semantic_version_and_platform(backend_context) -> N
                     version=version,
                     download_url=f"https://github.com/example/BAP/{version}.exe",
                     sha256="a" * 64,
+                    source_tree_sha="c" * 40,
                     published_at=datetime(2026, 1, 1),
                     is_active=True,
                 )
@@ -35,6 +36,7 @@ def test_latest_release_uses_semantic_version_and_platform(backend_context) -> N
                 version="9.0.0",
                 download_url="https://github.com/example/BAP/linux.tar.gz",
                 sha256="b" * 64,
+                source_tree_sha="c" * 40,
                 published_at=datetime(2026, 1, 1),
                 is_active=True,
             )
@@ -47,11 +49,12 @@ def test_latest_release_uses_semantic_version_and_platform(backend_context) -> N
 
 
 def test_release_management_input_requires_semver_https_and_sha256() -> None:
-    validate_release_input("1.2.3", "https://github.com/example/BAP.exe", "a" * 64)
+    validate_release_input("1.2.3", "https://github.com/example/BAP.exe", "a" * 64, "c" * 40)
     for values in (
-        ("not-version", "https://example.com/a.exe", "a" * 64),
-        ("1.0.0", "http://example.com/a.exe", "a" * 64),
-        ("1.0.0", "https://example.com/a.exe", "short"),
+        ("not-version", "https://example.com/a.exe", "a" * 64, "c" * 40),
+        ("1.0.0", "http://example.com/a.exe", "a" * 64, "c" * 40),
+        ("1.0.0", "https://example.com/a.exe", "short", "c" * 40),
+        ("1.0.0", "https://example.com/a.exe", "a" * 64, "short"),
     ):
         try:
             validate_release_input(*values)

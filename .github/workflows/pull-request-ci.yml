@@ -1,0 +1,183 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      backend_changed: ${{ steps.scope.outputs.backend_changed }}
+      desktop_changed: ${{ steps.scope.outputs.desktop_changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Classify changed paths
+        run: >-
+          python -m bap_backend.tools.delivery_candidate
+          --git-path git scope
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --github-output "$GITHUB_OUTPUT"
+      - name: Write classification summary
+        run: |
+          {
+            echo "## PR classification"
+            echo "- docs_only: ${{ steps.scope.outputs.docs_only }}"
+            echo "- backend_changed: ${{ steps.scope.outputs.backend_changed }}"
+            echo "- desktop_changed: ${{ steps.scope.outputs.desktop_changed }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  candidate:
+    name: Build and test immutable Candidate
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up uv and Python
+        id: setup-uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install locked development dependencies
+        shell: powershell
+        run: uv sync --frozen --all-extras --group dev
+      - name: Resolve Source Tree SHA
+        id: tree
+        shell: powershell
+        run: |
+          $tree = git rev-parse "HEAD^{tree}"
+          "value=$tree" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "BAP_SOURCE_TREE_SHA=$tree" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Run source-level automated tests
+        shell: powershell
+        run: .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp "$env:RUNNER_TEMP\pytest"
+      - name: Build unified Backend Artifact
+        shell: powershell
+        run: |
+          .\deployment\windows\backend\Build-BapBackendArtifact.ps1 `
+            -CommitSha "${{ github.sha }}" `
+            -SourceTreeSha "$env:BAP_SOURCE_TREE_SHA" `
+            -OutputDirectory "$env:RUNNER_TEMP\bap-candidate" `
+            -PythonPath "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe"
+      - name: Build Desktop Installer
+        shell: powershell
+        run: |
+          .\packaging\windows\Build-BapDesktop.ps1 `
+            -SourceTreeSha "$env:BAP_SOURCE_TREE_SHA" `
+            -OutputDirectory "$env:RUNNER_TEMP\bap-candidate" `
+            -WorkDirectory "$env:RUNNER_TEMP\bap-desktop-build" `
+            -PythonPath "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe"
+      - name: Test unpacked Backend and installed Desktop
+        shell: powershell
+        run: |
+          $backend = Get-ChildItem "$env:RUNNER_TEMP\bap-candidate\bap-backend-tree-*.zip" | Select-Object -Single
+          $installer = Get-ChildItem "$env:RUNNER_TEMP\bap-candidate\BAP-Setup-*.exe" | Select-Object -Single
+          .\deployment\ci\Test-BapCandidate.ps1 `
+            -BackendArtifact $backend.FullName `
+            -BackendChecksum ($backend.FullName + ".sha256") `
+            -DesktopInstaller $installer.FullName `
+            -SourceTreeSha "$env:BAP_SOURCE_TREE_SHA" `
+            -UvPath "${{ steps.setup-uv.outputs.uv-path }}" `
+            -WorkDirectory "$env:RUNNER_TEMP\bap-candidate-e2e"
+      - name: Create immutable delivery manifest
+        shell: powershell
+        run: |
+          $candidate = "$env:RUNNER_TEMP\bap-candidate"
+          $backend = Get-ChildItem "$candidate\bap-backend-tree-*.zip" | Select-Object -Single
+          $desktop = Get-ChildItem "$candidate\BAP-Setup-*.exe" | Select-Object -Single
+          @{
+            source_tests = "passed"
+            backend_package = "passed"
+            desktop_package = "passed"
+            installed_http_e2e = "passed"
+            cleanup = "passed"
+          } | ConvertTo-Json | Set-Content "$candidate\test-summary.json" -Encoding utf8
+          .\.venv\Scripts\python.exe -m bap_backend.tools.delivery_candidate create `
+            --output "$candidate\delivery-manifest.json" `
+            --pr-number "${{ github.event.pull_request.number }}" `
+            --pr-head-sha "${{ github.event.pull_request.head.sha }}" `
+            --pr-base-sha "${{ github.event.pull_request.base.sha }}" `
+            --ci-test-commit-sha "${{ github.sha }}" `
+            --source-tree-sha "$env:BAP_SOURCE_TREE_SHA" `
+            --ci-run-id "${{ github.run_id }}" `
+            --ci-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" `
+            --docs-only false `
+            --backend-changed "${{ needs.classify.outputs.backend_changed }}" `
+            --desktop-changed "${{ needs.classify.outputs.desktop_changed }}" `
+            --backend-artifact $backend.FullName `
+            --desktop-artifact $desktop.FullName `
+            --test source_tests=passed `
+            --test backend_package=passed `
+            --test desktop_package=passed `
+            --test installed_http_e2e=passed `
+            --test cleanup=passed
+          .\.venv\Scripts\python.exe -m bap_backend.tools.delivery_candidate validate `
+            --candidate-dir "$candidate" `
+            --expected-tree "$env:BAP_SOURCE_TREE_SHA"
+      - name: Upload tested Candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: bap-candidate-pr-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}\bap-candidate
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload failure diagnostics
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bap-ci-diagnostics-pr-${{ github.event.pull_request.number }}
+          path: |
+            ${{ runner.temp }}\bap-candidate-e2e\logs
+            ${{ runner.temp }}\bap-candidate\test-summary.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Write Candidate summary
+        if: ${{ always() }}
+        shell: powershell
+        run: |
+          @"
+          ## Windows Candidate
+          - Source Tree SHA: $env:BAP_SOURCE_TREE_SHA
+          - Build/Test Job: ${{ job.status }}
+          - Candidate: bap-candidate-pr-${{ github.event.pull_request.number }}
+          - Production credentials used: no
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [classify, candidate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce required result
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          CANDIDATE_RESULT: ${{ needs.candidate.result }}
+          DOCS_ONLY: ${{ needs.classify.outputs.docs_only }}
+        run: |
+          if [ "$CLASSIFY_RESULT" != "success" ]; then exit 1; fi
+          if [ "$DOCS_ONLY" = "true" ]; then
+            echo "Documentation-only PR passed without using a Windows runner."
+            exit 0
+          fi
+          if [ "$CANDIDATE_RESULT" != "success" ]; then exit 1; fi
+          echo "The immutable Candidate passed."
