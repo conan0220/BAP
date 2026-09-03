@@ -73,24 +73,8 @@ try {
     if ($OldRelease) {
         Set-Content -LiteralPath (Join-Path $Root "run\previous-release.txt") -Value $OldRelease -Encoding Ascii
     }
-    $ScheduledTask = if (-not $SkipScheduledTaskForTesting) {
-        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    } else {
-        $null
-    }
-    if ($ScheduledTask) {
-        # On some Windows Server hosts, Stop-ScheduledTask can block even when
-        # the task is already Ready.  Only request a stop for a running task.
-        if ($ScheduledTask.State -eq "Running") {
-            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-        }
-        for ($Attempt = 0; $Attempt -lt 15; $Attempt++) {
-            if (-not (Get-NetTCPConnection -LocalPort 12345 -State Listen -ErrorAction SilentlyContinue)) { break }
-            Start-Sleep -Seconds 1
-        }
-        if (Get-NetTCPConnection -LocalPort 12345 -State Listen -ErrorAction SilentlyContinue) {
-            throw "Backend port remained active after stopping the Scheduled Task."
-        }
+    if (-not $SkipScheduledTaskForTesting) {
+        Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName
     }
 
     $Database = Join-Path $Root "data\bap.db"

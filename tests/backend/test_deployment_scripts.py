@@ -260,8 +260,7 @@ def test_deploy_orders_backup_migration_cutover_task_and_health_with_rollback() 
     assert "Unable to switch the current junction." in deploy
     assert "Backend health check failed." in deploy
     assert "Deployment failed and rollback also failed." in deploy
-    assert '$ScheduledTask.State -eq "Running"' in deploy
-    assert "Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop" in deploy
+    assert "Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName" in deploy
     assert "Remove-BapCurrentJunction -Root $Root" in deploy
 
 
@@ -274,6 +273,18 @@ def test_current_junction_removal_uses_dotnet_and_validates_release_target() -> 
     assert "[IO.Directory]::Delete($Current)" in common
     assert "Current junction target is outside the releases directory." in common
     assert "Remove-Item -LiteralPath $Current" not in common
+
+
+def test_backend_stop_helper_only_terminates_verified_bap_uvicorn_tree() -> None:
+    common = (SCRIPTS / "Common-BapDeployment.ps1").read_text(encoding="utf-8")
+    rollback = (SCRIPTS / "Rollback-BapBackendRelease.ps1").read_text(encoding="utf-8")
+    assert "function Stop-BapBackendTaskAndListener" in common
+    assert '$Task.State -eq "Running"' in common
+    assert "Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop" in common
+    assert "bap_backend\\.app\\.main:app" in common
+    assert "Backend port belongs to an unrecognized process" in common
+    assert "Stop-Process -Id ([int]$Owner.ProcessId) -Force" in common
+    assert "Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName" in rollback
     assert "Remove-BapCurrentJunction -Root $Root" in rollback
 
 
