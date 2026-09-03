@@ -53,6 +53,24 @@ function Get-BapCurrentTarget {
     return $Item.Target
 }
 
+function Remove-BapCurrentJunction {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $Current = [IO.Path]::GetFullPath((Join-Path $Root "current"))
+    if (-not (Test-Path -LiteralPath $Current)) { return }
+    $Item = Get-Item -LiteralPath $Current -Force
+    if (-not ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Current path exists but is not a junction."
+    }
+    $Target = [IO.Path]::GetFullPath([string]$Item.Target)
+    $ReleasesPrefix = [IO.Path]::GetFullPath((Join-Path $Root "releases")).TrimEnd("\") + "\"
+    if (-not $Target.StartsWith($ReleasesPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Current junction target is outside the releases directory."
+    }
+    # Windows PowerShell 5.1 may block in Remove-Item when the path is a
+    # junction. Directory.Delete removes the junction itself, not its target.
+    [IO.Directory]::Delete($Current)
+}
+
 function Assert-BapReleasePath {
     param(
         [Parameter(Mandatory = $true)][string]$Root,

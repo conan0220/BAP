@@ -108,7 +108,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Alembic migration failed." }
 
     $Current = Join-Path $Root "current"
-    if (Test-Path -LiteralPath $Current) { Remove-Item -LiteralPath $Current -Force }
+    Remove-BapCurrentJunction -Root $Root
     & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $Release | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Unable to switch the current junction." }
 
@@ -133,7 +133,7 @@ try {
     try {
         if ($OldRelease) {
             $Current = Join-Path $Root "current"
-            if (Test-Path -LiteralPath $Current) { Remove-Item -LiteralPath $Current -Force }
+            Remove-BapCurrentJunction -Root $Root
             & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $OldRelease | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Unable to restore the previous current junction." }
             if ($Backup) { Copy-Item -LiteralPath $Backup -Destination (Join-Path $Root "data\bap.db") -Force }
