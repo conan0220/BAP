@@ -1,4 +1,4 @@
-"""BAP Desktop App package."""
+"""BAP Desktop App package for local IMU checks and boxing-analysis entry points."""
 
 APP_NAME = "BAP"
 PRODUCT_NAME = "Boxing Analysis Platform"
