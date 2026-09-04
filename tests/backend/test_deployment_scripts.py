@@ -47,7 +47,11 @@ def _deployment_manifest() -> dict:
     }
 
 
-def _backend_artifact(tmp_path: Path) -> tuple[Path, Path]:
+def _backend_artifact(
+    tmp_path: Path,
+    *,
+    health_script: str = "Write-Output 'health ok'\n",
+) -> tuple[Path, Path]:
     artifact = tmp_path / f"bap-backend-tree-{TREE}.zip"
     with ZipFile(artifact, "w") as archive:
         archive.writestr("deployment-manifest.json", json.dumps(_deployment_manifest()))
@@ -56,6 +60,7 @@ def _backend_artifact(tmp_path: Path) -> tuple[Path, Path]:
         archive.writestr("migrations/env.py", "")
         archive.writestr("deployment/runtime/Common-BapDeployment.ps1", "Write-Output 'common'\n")
         archive.writestr("deployment/runtime/Deploy-BapBackendRelease.ps1", "Write-Output 'deploy'\n")
+        archive.writestr("deployment/runtime/Test-BapBackendHealth.ps1", health_script)
         archive.writestr("alembic.ini", "")
         archive.writestr("pyproject.toml", "")
         archive.writestr("uv.lock", "")
@@ -260,8 +265,101 @@ def test_deploy_orders_backup_migration_cutover_task_and_health_with_rollback() 
     assert "Unable to switch the current junction." in deploy
     assert "Backend health check failed." in deploy
     assert "Deployment failed and rollback also failed." in deploy
+    catch_section = deploy.split("} catch {", 1)[1]
+    assert catch_section.index("Stop-BapBackendTaskAndListener") < catch_section.index(
+        "Remove-BapCurrentJunction"
+    )
     assert "Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName" in deploy
     assert "Remove-BapCurrentJunction -Root $Root" in deploy
+
+
+@pytest.mark.scenario("backend-automatic-deployment", "Scheduled Task 或 Health 失敗")
+@pytest.mark.scenario("ci-cd-status-reporting", "Backend Rollback 成功")
+def test_injected_health_failure_rolls_back_release_database_and_lkg(tmp_path) -> None:
+    root = tmp_path / "host"
+    _host(root)
+    previous = root / ("releases/" + "1" * 40)
+    previous_runtime = previous / "deployment/runtime"
+    previous_runtime.mkdir(parents=True)
+    (previous_runtime / "Test-BapBackendHealth.ps1").write_text(
+        "Write-Output 'rollback health ok'\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            r"C:\WINDOWS\system32\cmd.exe",
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            str(root / "current"),
+            str(previous),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    database = root / "data/bap.db"
+    database.write_text("last-known-good database", encoding="utf-8")
+    lkg = root / "run/last-known-good.json"
+    lkg_payload = {"master_commit_sha": "1" * 40, "backend_result": "succeeded"}
+    lkg.write_text(json.dumps(lkg_payload), encoding="utf-8")
+
+    escaped_database = str(database).replace("'", "''")
+    artifact, checksum = _backend_artifact(
+        tmp_path,
+        health_script=(
+            f"Set-Content -LiteralPath '{escaped_database}' -Value 'failed database'\n"
+            "throw 'Injected production health failure.'\n"
+        ),
+    )
+    promotion = tmp_path / "promotion-record.json"
+    promotion.write_text(
+        json.dumps(
+            {
+                "master_commit_sha": MASTER_COMMIT,
+                "source_tree_sha": TREE,
+                "backend_result": "pending",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            SCRIPTS / "Deploy-BapBackendRelease.ps1",
+            "-ArtifactPath",
+            artifact,
+            "-ChecksumPath",
+            checksum,
+            "-ExpectedSourceTreeSha",
+            TREE,
+            "-MasterCommitSha",
+            MASTER_COMMIT,
+            "-PromotionRecordPath",
+            promotion,
+            "-Root",
+            root,
+            "-SkipDependencyInstallForTesting",
+            "-SkipMigrationForTesting",
+            "-SkipScheduledTaskForTesting",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Injected production health failure" in (result.stdout + result.stderr)
+    assert (root / "current").resolve() == previous.resolve()
+    assert database.read_text(encoding="utf-8").strip() == "last-known-good database"
+    assert json.loads(lkg.read_text(encoding="utf-8")) == lkg_payload
+    assert json.loads(promotion.read_text(encoding="utf-8-sig"))["backend_result"] == "failed"
 
 
 def test_current_junction_removal_uses_dotnet_and_validates_release_target() -> None:

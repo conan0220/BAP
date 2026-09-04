@@ -10,6 +10,7 @@ param(
     [string]$TaskName = "BAPBackend",
     [switch]$SkipDependencyInstallForTesting,
     [switch]$PrepareOnlyForTesting,
+    [switch]$SkipMigrationForTesting,
     [switch]$SkipScheduledTaskForTesting,
     [switch]$SkipHealthCheckForTesting
 )
@@ -82,14 +83,16 @@ try {
         $Backup = Join-Path $Root ("backups\bap-" + (Get-Date -Format "yyyyMMddHHmmss") + "-" + $MasterCommitSha + ".db")
         Copy-Item -LiteralPath $Database -Destination $Backup
     }
-    Import-BapEnvironment -Path (Join-Path $Root "config\.env")
-    Push-Location $Release
-    try {
-        & $Python -m alembic -c (Join-Path $Release "alembic.ini") upgrade head
-    } finally {
-        Pop-Location
+    if (-not $SkipMigrationForTesting) {
+        Import-BapEnvironment -Path (Join-Path $Root "config\.env")
+        Push-Location $Release
+        try {
+            & $Python -m alembic -c (Join-Path $Release "alembic.ini") upgrade head
+        } finally {
+            Pop-Location
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Alembic migration failed." }
     }
-    if ($LASTEXITCODE -ne 0) { throw "Alembic migration failed." }
 
     $Current = Join-Path $Root "current"
     Remove-BapCurrentJunction -Root $Root
@@ -116,6 +119,9 @@ try {
     } catch {}
     try {
         if ($OldRelease) {
+            if (-not $SkipScheduledTaskForTesting) {
+                Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName
+            }
             $Current = Join-Path $Root "current"
             Remove-BapCurrentJunction -Root $Root
             & "C:\WINDOWS\system32\cmd.exe" /d /c mklink /J $Current $OldRelease | Out-Null

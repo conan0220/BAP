@@ -113,6 +113,8 @@ def test_cd_resolves_and_verifies_the_pr_candidate_without_rebuilding() -> None:
     assert "Candidate PR does not match." in text
     assert "matchingRuns.length !== 1" in text
     assert "item.conclusion === \"success\"" in text
+    assert "--expected-backend-changed" in text
+    assert "--expected-desktop-changed" in text
     assert "scope mismatch" in text.lower()
     for forbidden in ("Build-BapBackendArtifact.ps1", "Build-BapDesktop.ps1", "PyInstaller", "ISCC.exe"):
         assert forbidden not in text

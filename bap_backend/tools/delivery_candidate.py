@@ -73,6 +73,8 @@ def _parser() -> argparse.ArgumentParser:
     validate = commands.add_parser("validate")
     validate.add_argument("--candidate-dir", type=Path, required=True)
     validate.add_argument("--expected-tree", required=True)
+    validate.add_argument("--expected-backend-changed", type=_bool)
+    validate.add_argument("--expected-desktop-changed", type=_bool)
     validate.add_argument("--github-output", type=Path)
     return parser
 
@@ -133,7 +135,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from bap_backend.deployment.artifact import validate_candidate
 
-    manifest = validate_candidate(args.candidate_dir, expected_source_tree_sha=args.expected_tree)
+    manifest = validate_candidate(
+        args.candidate_dir,
+        expected_source_tree_sha=args.expected_tree,
+        expected_backend_changed=args.expected_backend_changed,
+        expected_desktop_changed=args.expected_desktop_changed,
+    )
     values = {
         "docs_only": manifest.docs_only,
         "backend_changed": manifest.backend_changed,
