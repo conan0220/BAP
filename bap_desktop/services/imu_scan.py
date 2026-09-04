@@ -103,6 +103,7 @@ class PortScanResult:
     ended_at: float
     byte_count: int = 0
     frames: list[AnrotFrame] = field(default_factory=list)
+    frame_timestamps: list[float] = field(default_factory=list)
     connection_type: ConnectionType = ConnectionType.UNKNOWN
     group_id: int | None = None
     node_ids: tuple[int, ...] = ()
@@ -160,6 +161,7 @@ def scan_port(
     cancel_event: Event | None = None,
     parser_factory: Callable[[], AnrotSerialParser] = AnrotSerialParser,
     clock: Callable[[], float] = time.perf_counter,
+    wall_clock: Callable[[], float] = time.time,
     sleep: Callable[[float], None] = time.sleep,
 ) -> PortScanResult:
     """Read one port until a fixed deadline without ever writing to the device."""
@@ -200,7 +202,9 @@ def scan_port(
                 continue
             data = connection.read(available)
             result.byte_count += len(data)
-            result.frames.extend(parser.parse(data))
+            parsed_frames = parser.parse(data)
+            result.frames.extend(parsed_frames)
+            result.frame_timestamps.extend([wall_clock()] * len(parsed_frames))
         _finalize_classification(result)
     except (OSError, serial.SerialException) as error:
         result.status = ScanStatus.NOT_CONNECTED

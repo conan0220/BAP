@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import csv
-import json
+import re
 import shutil
 import tempfile
-import uuid
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from threading import Event
 from typing import Callable
 
+from anrot_imu_driver.commands.record_data import split_gateway_packets
+from anrot_imu_driver.parsers.anrot_serial_parser import AnrotFrame
 from bap_desktop.services.imu_scan import (
     DEFAULT_BAUD_RATE,
     ConnectionType,
@@ -21,6 +24,59 @@ from bap_desktop.services.imu_scan import (
     ScanStatus,
     scan_all_ports,
 )
+
+
+MAX_NODES = 16
+WIRELESS_NODE_FIELDS = (
+    "ID",
+    "AccX[G]",
+    "AccY[G]",
+    "AccZ[G]",
+    "GyrX[deg/s]",
+    "GyrY[deg/s]",
+    "GyrZ[deg/s]",
+    "MagX[uT]",
+    "MagY[uT]",
+    "MagZ[uT]",
+    "Roll[deg]",
+    "Pitch[deg]",
+    "Yaw[deg]",
+    "Qw",
+    "Qx",
+    "Qy",
+    "Qz",
+)
+WIRELESS_CSV_HEADER = (
+    "ts_ms(ms)",
+    "UnixTimeStamp(sec)",
+    *(f"Node{node}_{field}" for node in range(1, MAX_NODES + 1) for field in WIRELESS_NODE_FIELDS),
+)
+WIRED_CSV_HEADER = (
+    "UnixTimeStamp(sec)",
+    "Time(ms)",
+    "Pressure(Pa)",
+    "Temperature(°C)",
+    "AccX[G]",
+    "AccY[G]",
+    "AccZ[G]",
+    "GyrX[deg/s]",
+    "GyrY[deg/s]",
+    "GyrZ[deg/s]",
+    "MagX[uT]",
+    "MagY[uT]",
+    "MagZ[uT]",
+    "Roll[deg]",
+    "Pitch[deg]",
+    "Yaw[deg]",
+    "Qw",
+    "Qx",
+    "Qy",
+    "Qz",
+)
+
+
+def _wireless_packets(frames: list[AnrotFrame]) -> list[list[AnrotFrame]]:
+    return split_gateway_packets([frame for frame in frames if frame.frame_type == 0x63])
 
 
 REPORT_COLUMNS = (
@@ -62,7 +118,21 @@ class DiagnosticReportRow:
 @dataclass(frozen=True, slots=True)
 class DiagnosticReport:
     rows: tuple[DiagnosticReportRow, ...]
-    csv_path: Path | None
+    csv_files: tuple["DiagnosticCsvFile", ...]
+
+    @property
+    def csv_path(self) -> Path | None:
+        """Keep the former single-file API for a one-Port report."""
+
+        return self.csv_files[0].path if len(self.csv_files) == 1 else None
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticCsvFile:
+    port: str
+    connection_type: ConnectionType
+    path: Path
+    data_row_count: int
 
 
 class ImuDiagnosticsService:
@@ -75,13 +145,16 @@ class ImuDiagnosticsService:
         duration_seconds: float = 5.0,
         temp_dir: Path | None = None,
         scan: Callable[..., list[PortScanResult]] = scan_all_ports,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self.adapter = adapter or PySerialPortAdapter()
         self.duration_seconds = duration_seconds
         self.temp_dir = temp_dir or Path(tempfile.gettempdir()) / "BAP" / "imu-diagnostics"
         self.scan = scan
+        self.wall_clock = wall_clock
         self._managed_files: set[Path] = set()
         self._latest: DiagnosticReport | None = None
+        self._run_sequence = 0
 
     @property
     def latest_report(self) -> DiagnosticReport | None:
@@ -104,18 +177,36 @@ class ImuDiagnosticsService:
         )
         if phase_callback is not None:
             phase_callback("analyzing")
-        csv_path = self._write_csv(results) if any(result.frames for result in results) else None
+        run_timestamp = self.wall_clock()
+        self._run_sequence += 1
+        csv_files = self._write_csv_files(
+            results,
+            run_timestamp=run_timestamp,
+            run_sequence=self._run_sequence,
+        )
         rows = tuple(self._to_report_row(result) for result in results)
-        self._latest = DiagnosticReport(rows=rows, csv_path=csv_path)
+        self._latest = DiagnosticReport(rows=rows, csv_files=csv_files)
         return self._latest
 
     def export_csv(self, destination: Path) -> Path:
-        if self._latest is None or self._latest.csv_path is None:
+        if self._latest is None or len(self._latest.csv_files) != 1:
             raise FileNotFoundError("目前沒有可匯出的 IMU 測試 CSV")
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(self._latest.csv_path, destination)
+        shutil.copy2(self._latest.csv_files[0].path, destination)
         return destination
+
+    def export_csv_files(self, destination_directory: Path) -> tuple[Path, ...]:
+        if self._latest is None or not self._latest.csv_files:
+            raise FileNotFoundError("目前沒有可匯出的 IMU 測試 CSV")
+        destination_directory = Path(destination_directory)
+        destination_directory.mkdir(parents=True, exist_ok=True)
+        exported: list[Path] = []
+        for csv_file in self._latest.csv_files:
+            destination = self._unique_path(destination_directory / csv_file.path.name)
+            shutil.copy2(csv_file.path, destination)
+            exported.append(destination)
+        return tuple(exported)
 
     def cleanup(self) -> None:
         for path in tuple(self._managed_files):
@@ -124,52 +215,138 @@ class ImuDiagnosticsService:
         self._latest = None
 
     def _delete_latest_csv(self) -> None:
-        if self._latest is not None and self._latest.csv_path is not None:
-            self._latest.csv_path.unlink(missing_ok=True)
-            self._managed_files.discard(self._latest.csv_path)
+        if self._latest is not None:
+            for csv_file in self._latest.csv_files:
+                csv_file.path.unlink(missing_ok=True)
+                self._managed_files.discard(csv_file.path)
 
-    def _write_csv(self, results: list[PortScanResult]) -> Path:
+    def _write_csv_files(
+        self,
+        results: list[PortScanResult],
+        *,
+        run_timestamp: float,
+        run_sequence: int,
+    ) -> tuple[DiagnosticCsvFile, ...]:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        path = self.temp_dir / f"{uuid.uuid4()}.csv"
-        frame_keys = sorted(
-            {
-                key
-                for result in results
-                for frame in result.frames
-                for key in frame.to_dict()
-            }
-        )
-        fieldnames = [
-            "port",
-            "manufacturer",
-            "connection_type",
-            "group_id",
-            "node_id",
-            *frame_keys,
-        ]
+        stamp = datetime.fromtimestamp(run_timestamp).strftime("%Y%m%d_%H%M%S")
+        run_id = f"{stamp}_{run_sequence:02d}"
+        files: list[DiagnosticCsvFile] = []
+        for result in results:
+            if result.status is not ScanStatus.CONNECTED or not result.frames:
+                continue
+            kind = "wireless" if result.connection_type is ConnectionType.WIRELESS_RECEIVER else "wired"
+            safe_port = re.sub(r"[^A-Za-z0-9._-]+", "-", result.port).strip("-") or "port"
+            path = self._unique_path(self.temp_dir / f"imu_{run_id}_{safe_port}_{kind}.csv")
+            if result.connection_type is ConnectionType.WIRELESS_RECEIVER:
+                row_count = self._write_wireless_csv(path, result, run_timestamp)
+            else:
+                row_count = self._write_wired_csv(path, result, run_timestamp)
+            self._managed_files.add(path)
+            files.append(DiagnosticCsvFile(result.port, result.connection_type, path, row_count))
+        return tuple(files)
+
+    def _write_wireless_csv(
+        self,
+        path: Path,
+        result: PortScanResult,
+        fallback_timestamp: float,
+    ) -> int:
+        packets = _wireless_packets(result.frames)
+        timestamp_by_frame = self._timestamp_by_frame(result)
         with path.open("w", encoding="utf-8-sig", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for result in results:
-                for frame in result.frames:
-                    row = {
-                        "port": result.port,
-                        "manufacturer": result.manufacturer or "",
-                        "connection_type": result.connection_type.value,
-                        "group_id": getattr(frame, "gw_id", None),
-                        "node_id": getattr(frame, "node_id", None),
-                    }
-                    row.update(
-                        {
-                            key: json.dumps(value, ensure_ascii=False)
-                            if isinstance(value, (list, tuple, dict))
-                            else value
-                            for key, value in frame.to_dict().items()
-                        }
-                    )
-                    writer.writerow(row)
-        self._managed_files.add(path)
-        return path
+            writer = csv.writer(csv_file)
+            writer.writerow(WIRELESS_CSV_HEADER)
+            for packet in packets:
+                unix_timestamp = timestamp_by_frame.get(id(packet[0]), fallback_timestamp)
+                writer.writerow(self._wireless_row(packet, unix_timestamp))
+        return len(packets)
+
+    def _write_wired_csv(
+        self,
+        path: Path,
+        result: PortScanResult,
+        fallback_timestamp: float,
+    ) -> int:
+        timestamp_by_frame = self._timestamp_by_frame(result)
+        with path.open("w", encoding="utf-8-sig", newline="") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(WIRED_CSV_HEADER)
+            for frame in result.frames:
+                unix_timestamp = timestamp_by_frame.get(id(frame), fallback_timestamp)
+                writer.writerow(self._wired_row(frame, unix_timestamp))
+        return len(result.frames)
+
+    @staticmethod
+    def _timestamp_by_frame(result: PortScanResult) -> dict[int, float]:
+        return {
+            id(frame): timestamp
+            for frame, timestamp in zip(result.frames, result.frame_timestamps)
+        }
+
+    @staticmethod
+    def _unique_path(path: Path) -> Path:
+        candidate = path
+        counter = 2
+        while candidate.exists():
+            candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
+            counter += 1
+        return candidate
+
+    @classmethod
+    def _wireless_row(cls, packet: list[AnrotFrame], unix_timestamp: float) -> list[object]:
+        first = packet[0]
+        frames_by_index = {
+            frame.node_index: frame
+            for frame in packet
+            if frame.node_index is not None and 0 <= frame.node_index < MAX_NODES
+        }
+        row: list[object] = [
+            first.gw_ts_ms if first.gw_ts_ms is not None else "",
+            int(unix_timestamp),
+        ]
+        for node_index in range(MAX_NODES):
+            frame = frames_by_index.get(node_index)
+            row.extend([""] * len(WIRELESS_NODE_FIELDS) if frame is None else cls._wireless_node_fields(frame))
+        return row
+
+    @classmethod
+    def _wireless_node_fields(cls, frame: AnrotFrame) -> list[object]:
+        return [
+            frame.node_id if frame.node_id is not None else "",
+            *cls._vector(frame.acc, 3),
+            *cls._vector(frame.gyr, 2),
+            *cls._vector(frame.mag, 2),
+            cls._number(frame.roll, 2),
+            cls._number(frame.pitch, 2),
+            cls._number(frame.yaw, 2),
+            *cls._vector(frame.quat, 3, count=4),
+        ]
+
+    @classmethod
+    def _wired_row(cls, frame: AnrotFrame, unix_timestamp: float) -> list[object]:
+        return [
+            int(unix_timestamp),
+            frame.system_time_ms if frame.system_time_ms is not None else "",
+            cls._number(frame.pressure, 0),
+            cls._number(frame.temperature, 0),
+            *cls._vector(frame.acc, 3),
+            *cls._vector(frame.gyr, 3),
+            *cls._vector(frame.mag, 2),
+            cls._number(frame.roll, 2),
+            cls._number(frame.pitch, 2),
+            cls._number(frame.yaw, 2),
+            *cls._vector(frame.quat, 3, count=4),
+        ]
+
+    @staticmethod
+    def _number(value, precision: int) -> str:
+        return "" if value is None else f"{value:.{precision}f}"
+
+    @classmethod
+    def _vector(cls, value, precision: int, *, count: int = 3) -> list[str]:
+        if value is None:
+            return [""] * count
+        return [cls._number(component, precision) for component in value]
 
     @staticmethod
     def _to_report_row(result: PortScanResult) -> DiagnosticReportRow:
@@ -179,7 +356,12 @@ class ImuDiagnosticsService:
         else:
             group_nodes = "—"
         duration = result.duration_seconds
-        sample_rate = len(result.frames) / duration if duration > 0 else 0.0
+        data_rows = (
+            len(_wireless_packets(result.frames))
+            if result.connection_type is ConnectionType.WIRELESS_RECEIVER
+            else len(result.frames)
+        )
+        sample_rate = data_rows / duration if duration > 0 else 0.0
         if result.status is not ScanStatus.CONNECTED:
             sample_rate = 0.0
         return DiagnosticReportRow(

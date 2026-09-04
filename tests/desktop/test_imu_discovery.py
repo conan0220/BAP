@@ -81,7 +81,7 @@ def test_only_successfully_parsed_sources_are_offered(hi91_frame) -> None:
 @pytest.mark.scenario("desktop-app-shell", "完成 IMU 來源選擇")
 @pytest.mark.scenario("imu-source-discovery", "改選有線 Port")
 @pytest.mark.scenario("imu-source-discovery", "選好來源並繼續")
-def test_page_enforces_single_selection_and_shows_pending(qtbot, hi91_frame) -> None:
+def test_page_requires_distinct_placement_assignments_and_shows_pending(qtbot, hi91_frame) -> None:
     service = ImuDiscoveryService(
         adapter=object(),
         duration_seconds=0.01,
@@ -93,13 +93,13 @@ def test_page_enforces_single_selection_and_shows_pending(qtbot, hi91_frame) -> 
     page = PunchItemPage("出拳速度", service)
     qtbot.addWidget(page)
     page.show()
-    qtbot.waitUntil(lambda: len(page._source_buttons) == 2, timeout=1000)
-    buttons = list(page._source_buttons)
-    buttons[0].click()
-    assert page.selected_source.port == "COM1"
-    buttons[1].click()
-    assert page.selected_source.port == "COM2"
-    assert not buttons[0].isChecked()
+    qtbot.waitUntil(lambda: len(page._source_selectors) == 2, timeout=1000)
+    selectors = list(page._source_selectors)
+    selectors[0].setCurrentIndex(1)
+    selectors[1].setCurrentIndex(2)
+    assert page.assignments["left_wrist"].port == "COM1"
+    assert page.assignments["right_wrist"].port == "COM2"
+    assert page.continue_button.isEnabled()
     page.continue_button.click()
     assert page.status.text() == "出拳速度：待開發"
     assert service.latest_result is None
@@ -142,14 +142,15 @@ def test_page_selects_one_wireless_node(qtbot, gateway_frame) -> None:
             make_result("COM7", gateway_frame, ConnectionType.WIRELESS_RECEIVER)
         ],
     )
-    page = PunchItemPage("拳型辨識", service)
+    page = PunchItemPage("拳種辨識", service)
     qtbot.addWidget(page)
     page.show()
-    qtbot.waitUntil(lambda: len(page._source_buttons) >= 1, timeout=1000)
-    button = list(page._source_buttons)[0]
-    button.click()
+    qtbot.waitUntil(lambda: len(page._source_selectors) == 2, timeout=1000)
+    selector = list(page._source_selectors)[0]
+    selector.setCurrentIndex(1)
 
-    assert page.selected_source is not None
-    assert page.selected_source.port == "COM7"
-    assert page.selected_source.group_id is not None
-    assert page.selected_source.node_id is not None
+    source = page.assignments["holder_left_pad"]
+    assert source.port == "COM7"
+    assert source.group_id is not None
+    assert source.node_id is not None
+    assert not page.continue_button.isEnabled()

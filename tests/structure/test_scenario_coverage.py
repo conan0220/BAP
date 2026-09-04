@@ -11,3 +11,10 @@ def test_automated_ci_cd_scenarios_have_pytest_markers() -> None:
     assert not missing, "Missing pytest.mark.scenario links:\n" + "\n".join(
         f"- {capability}: {scenario}" for capability, scenario in missing
     )
+
+
+def test_redesign_desktop_app_ui_scenarios_have_pytest_markers() -> None:
+    missing = sorted(missing_scenarios(ROOT, "redesign-desktop-app-ui"))
+    assert not missing, "Missing pytest.mark.scenario links:\n" + "\n".join(
+        f"- {capability}: {scenario}" for capability, scenario in missing
+    )

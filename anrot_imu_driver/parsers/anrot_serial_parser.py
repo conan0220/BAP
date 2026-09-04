@@ -249,7 +249,12 @@ class AnrotSerialParser:
                     crc_calculated = self.crc16_update(0, frame[:4] + frame[6:])
                     crc_received = struct.unpack_from('<H', frame, 4)[0]
                     if crc_calculated == crc_received:
-                        self.frame.reset()  # Reset data
+                        # Each decoded serial packet must own an independent
+                        # result object. Reusing and resetting ``self.frame``
+                        # would mutate every frame reference returned by
+                        # earlier calls, making a recording look like many
+                        # copies of its final sample.
+                        self.frame = AnrotFrame()
                         self.frame.frame_type = frame[6]
                         extra_frames = self.parse_data(frame[self.CH_HDR_SIZE:])
                         if extra_frames:

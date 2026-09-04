@@ -59,12 +59,14 @@ def main() -> int:
     from bap_desktop.services.update import UpdateService
     from bap_desktop.settings import DesktopSettings
     from bap_desktop.ui.main_window import MainWindow
+    from bap_desktop.ui.styles import apply_bap_style
 
     smoke_test = "--smoke-test" in sys.argv
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName(PRODUCT_NAME)
+    apply_bap_style(app)
     settings = DesktopSettings()
     settings.prepare_local_directories()
     base_url = str(settings.api_base_url)

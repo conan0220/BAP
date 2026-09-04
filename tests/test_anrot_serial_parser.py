@@ -47,6 +47,22 @@ def test_invalid_crc_is_rejected_and_later_frame_is_accepted(hi91_frame: bytes) 
     assert frames[0].system_time_ms == 456789
 
 
+@pytest.mark.scenario("imu-data-parsing", "Sequential valid frames retain their own values")
+def test_frames_from_separate_reads_keep_independent_values() -> None:
+    parser = AnrotSerialParser()
+
+    first = parser.parse(build_hi91_frame())[0]
+    second = parser.parse(build_hi81_frame())[0]
+
+    assert first is not second
+    assert first.frame_type == 0x91
+    assert first.system_time_ms == 456789
+    assert first.temperature == 25
+    assert second.frame_type == 0x81
+    assert second.system_time_ms == 987654
+    assert second.temperature == 22
+
+
 @pytest.mark.parametrize(
     ("frame_factory", "frame_type"),
     [
