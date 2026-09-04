@@ -13,6 +13,7 @@ $ErrorActionPreference = "Stop"
 if (-not $PreviousRelease) { $PreviousRelease = (Get-Content -LiteralPath (Join-Path $Root "run\previous-release.txt") -Raw).Trim() }
 $PreviousRelease = Assert-BapReleasePath -Root $Root -ReleasePath $PreviousRelease
 if (-not (Test-Path -LiteralPath $PreviousRelease -PathType Container)) { throw "Previous release does not exist." }
+$PreviousCommitSha = Get-BapReleaseCommitSha -ReleasePath $PreviousRelease
 
 if (-not $SkipScheduledTaskForTesting) {
     Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName
@@ -32,7 +33,7 @@ if ($DatabaseBackup) {
 }
 if (-not $SkipScheduledTaskForTesting) { Start-ScheduledTask -TaskName $TaskName }
 if (-not $SkipHealthCheckForTesting) {
-    & (Join-Path $PreviousRelease "deployment\runtime\Test-BapBackendHealth.ps1")
+    & (Join-Path $PreviousRelease "deployment\runtime\Test-BapBackendHealth.ps1") -ExpectedCommitSha $PreviousCommitSha
     if ($LASTEXITCODE -ne 0) { throw "Rollback health check failed." }
 }
 Write-Output "BAP Backend rollback completed."
