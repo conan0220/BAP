@@ -382,6 +382,12 @@ def test_backend_stop_helper_only_terminates_verified_bap_uvicorn_tree() -> None
     assert "bap_backend\\.app\\.main:app" in common
     assert "Backend port belongs to an unrecognized process" in common
     assert "Stop-Process -Id ([int]$Owner.ProcessId) -Force" in common
+    helper = common.split("function Stop-BapBackendTaskAndListener", 1)[1].split(
+        "function Assert-BapReleasePath", 1
+    )[0]
+    assert helper.index("Start-Sleep -Seconds 1") < helper.index(
+        "if ($Listeners.Count -eq 0) { return }"
+    )
     assert "Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName" in rollback
     assert "Remove-BapCurrentJunction -Root $Root" in rollback
 

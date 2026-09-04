@@ -86,12 +86,17 @@ function Stop-BapBackendTaskAndListener {
     # action while the Python launcher and its uvicorn child remain alive.
     # Give a normal stop a short chance, then terminate only a listener whose
     # process tree and command line prove that it belongs to this BAP root.
-    for ($Attempt = 0; $Attempt -lt 3; $Attempt++) {
-        if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) { return }
+    # A just-started Uvicorn child can exist before it binds the port. Returning
+    # immediately in that window leaves an orphan that starts listening after
+    # Rollback has already switched current. Observe a short settling window
+    # before deciding that there is no listener to terminate.
+    $Listeners = @()
+    for ($Attempt = 0; $Attempt -lt 5; $Attempt++) {
         Start-Sleep -Seconds 1
+        $Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+        if ($Listeners.Count -gt 0) { break }
     }
-
-    $Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($Listeners.Count -eq 0) { return }
     $RootFull = [IO.Path]::GetFullPath($Root).TrimEnd("\").ToLowerInvariant()
     $CurrentPython = (Join-Path $RootFull "current\.venv\scripts\python.exe")
     $ReleasePrefix = (Join-Path $RootFull "releases\")
