@@ -38,6 +38,7 @@ try {
 $Temp = Join-Path $Root ("incoming\extract-" + [Guid]::NewGuid().ToString("N"))
 $Release = Assert-BapReleasePath -Root $Root -ReleasePath (Join-Path $Root ("releases\" + $MasterCommitSha))
 $OldRelease = $null
+$OldCommitSha = $null
 $Backup = $null
 try {
     if (Test-Path -LiteralPath $Release) {
@@ -72,6 +73,7 @@ try {
 
     $OldRelease = Get-BapCurrentTarget -Root $Root
     if ($OldRelease) {
+        $OldCommitSha = Get-BapReleaseCommitSha -ReleasePath $OldRelease
         Set-Content -LiteralPath (Join-Path $Root "run\previous-release.txt") -Value $OldRelease -Encoding Ascii
     }
     if (-not $SkipScheduledTaskForTesting) {
@@ -129,7 +131,7 @@ try {
             if ($Backup) { Copy-Item -LiteralPath $Backup -Destination (Join-Path $Root "data\bap.db") -Force }
             if (-not $SkipScheduledTaskForTesting) { Start-ScheduledTask -TaskName $TaskName }
             if (-not $SkipHealthCheckForTesting) {
-                & (Join-Path $OldRelease "deployment\runtime\Test-BapBackendHealth.ps1")
+                & (Join-Path $OldRelease "deployment\runtime\Test-BapBackendHealth.ps1") -ExpectedCommitSha $OldCommitSha
             }
         }
     } catch {

@@ -271,6 +271,8 @@ def test_deploy_orders_backup_migration_cutover_task_and_health_with_rollback() 
     )
     assert "Stop-BapBackendTaskAndListener -Root $Root -TaskName $TaskName" in deploy
     assert "Remove-BapCurrentJunction -Root $Root" in deploy
+    assert "Get-BapReleaseCommitSha -ReleasePath $OldRelease" in deploy
+    assert "-ExpectedCommitSha $OldCommitSha" in catch_section
 
 
 @pytest.mark.scenario("backend-automatic-deployment", "Scheduled Task 或 Health 失敗")
@@ -281,8 +283,18 @@ def test_injected_health_failure_rolls_back_release_database_and_lkg(tmp_path) -
     previous = root / ("releases/" + "1" * 40)
     previous_runtime = previous / "deployment/runtime"
     previous_runtime.mkdir(parents=True)
+    previous_commit = "1" * 40
+    (previous / "promotion-record.json").write_text(
+        json.dumps({"master_commit_sha": previous_commit}),
+        encoding="utf-8",
+    )
     (previous_runtime / "Test-BapBackendHealth.ps1").write_text(
-        "Write-Output 'rollback health ok'\n",
+        (
+            "param([string]$ExpectedCommitSha)\n"
+            f"if ($ExpectedCommitSha -cne '{previous_commit}') {{ "
+            "throw 'Rollback commit identity was not verified.' }\n"
+            "Write-Output 'rollback health ok'\n"
+        ),
         encoding="utf-8",
     )
     subprocess.run(
@@ -371,6 +383,8 @@ def test_current_junction_removal_uses_dotnet_and_validates_release_target() -> 
     assert "[IO.Directory]::Delete($Current)" in common
     assert "Current junction target is outside the releases directory." in common
     assert "Remove-Item -LiteralPath $Current" not in common
+    assert "Get-BapReleaseCommitSha -ReleasePath $PreviousRelease" in rollback
+    assert "-ExpectedCommitSha $PreviousCommitSha" in rollback
 
 
 def test_backend_stop_helper_only_terminates_verified_bap_uvicorn_tree() -> None:
@@ -423,6 +437,10 @@ def test_rollback_switches_current_and_restores_database(tmp_path) -> None:
     failed = root / ("releases/" + "2" * 40)
     previous.mkdir(parents=True)
     failed.mkdir(parents=True)
+    (previous / "promotion-record.json").write_text(
+        json.dumps({"master_commit_sha": "1" * 40}),
+        encoding="utf-8",
+    )
     (root / "run").mkdir()
     (root / "data").mkdir()
     (root / "backups").mkdir()

@@ -53,6 +53,24 @@ function Get-BapCurrentTarget {
     return $Item.Target
 }
 
+function Get-BapReleaseCommitSha {
+    param([Parameter(Mandatory = $true)][string]$ReleasePath)
+    $ReleasePath = [IO.Path]::GetFullPath($ReleasePath).TrimEnd("\")
+    $PromotionPath = Join-Path $ReleasePath "promotion-record.json"
+    if (-not (Test-Path -LiteralPath $PromotionPath -PathType Leaf)) {
+        throw "Release promotion record was not found."
+    }
+    $Promotion = Get-Content -LiteralPath $PromotionPath -Raw | ConvertFrom-Json
+    $CommitSha = [string]$Promotion.master_commit_sha
+    if ($CommitSha -notmatch "^[0-9a-f]{40}$") {
+        throw "Release promotion record contains an invalid master commit SHA."
+    }
+    if ([IO.Path]::GetFileName($ReleasePath) -cne $CommitSha) {
+        throw "Release directory does not match its promoted master commit SHA."
+    }
+    return $CommitSha
+}
+
 function Remove-BapCurrentJunction {
     param([Parameter(Mandatory = $true)][string]$Root)
     $Current = [IO.Path]::GetFullPath((Join-Path $Root "current"))
