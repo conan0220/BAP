@@ -60,7 +60,9 @@
 
 - [x] 7.1 執行 OpenSpec strict validation、Desktop test suite 及完整 pytest，修正所有失敗。
 - [x] 7.2 使用 `open_BAP.cmd` 執行人工 UI smoke test，逐頁核對已確認的登入、總覽、IMU Report 與五個拳擊項目畫面。
-- [ ] 7.3 建立 Windows installer，於乾淨 Windows 測試安裝、啟動、鍵盤操作與解除安裝，確認本機圖示和 QSS 均包含在安裝包內。
+- [x] 7.3 建立 Windows installer，於乾淨 Windows 測試安裝、啟動、鍵盤操作與解除安裝，確認本機圖示和 QSS 均包含在安裝包內。
+  - 驗證紀錄：[PR #13 CI Run 33933390310](https://github.com/conan0220/BAP/actions/runs/33933390310)，feature commit `9c716aa218d8f732101af07f3e2dc1e44904a21e`。Source-level tests、Build Desktop Installer、Test unpacked Backend and installed Desktop、Upload tested Candidate 及 CI Gate 均成功。
+  - 驗證範圍：Windows Runner 執行安裝包的安裝、啟動 smoke test、API E2E、解除安裝及暫存清理；鍵盤操作由原始碼層級 Qt tests 驗證，圖示收集由 packaging tests 檢查，QSS 隨安裝後啟動載入。外觀搭配 7.2 人工驗證；不代表 CI 對安裝版所有頁面做過視覺比對或鍵盤操作。
 
 ## 8. 逐 Port CSV schema 與無線取樣率
 

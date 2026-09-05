@@ -32,6 +32,8 @@
 | quaternion | 以 W、X、Y、Z 四個分量表示三維姿態旋轉的方法。 |
 | roll／pitch／yaw | 分別描述繞三個軸旋轉的 Euler angles，本規格以 degrees 表示。 |
 | newline | 表示 NMEA sentence 結束的換行字元。 |
+| `AnrotFrame` | Parser 為一筆 frame 建立的 Python 資料物件。 |
+| 獨立物件 | 不會因為後續 frame 被解析而一起改變內容的資料物件。 |
 
 ## Purpose
 
@@ -40,7 +42,7 @@
 ## Requirements
 
 ### Requirement: 增量 ANROT 二進位 framing
-Binary parser SHALL 緩衝任意分段的輸入 bytes、識別以 `0x5A 0xA5` 開頭的 frames、使用宣告的 payload length 等待完整 frame，且僅對計算出的 CRC-16 與接收 CRC 相符的 frames 輸出量測資料。
+Binary parser SHALL 緩衝任意分段的輸入 bytes、識別以 `0x5A 0xA5` 開頭的 frames、使用宣告的 payload length 等待完整 frame，且僅對計算出的 CRC-16 與接收 CRC 相符的 frames 輸出量測資料。每個成功解析的單一裝置 frame SHALL 使用獨立的 `AnrotFrame` 物件，後續解析不得改變先前已輸出的 frame 內容。
 
 #### Scenario: A valid frame arrives in multiple chunks
 - **WHEN** 有效 ANROT frame 的 bytes 分散在多次 parser calls 中提供
@@ -53,6 +55,11 @@ Binary parser SHALL 緩衝任意分段的輸入 bytes、識別以 `0x5A 0xA5` �
 #### Scenario: A complete frame has an invalid CRC
 - **WHEN** 完整 ANROT frame 的計算 CRC 不等於接收的 CRC
 - **THEN** parser 不會為該 frame 輸出任何量測資料，並會繼續接受後續輸入
+
+#### Scenario: Sequential valid frames retain their own values
+- **WHEN** parser 依序解析兩筆內容不同且 CRC 有效的單一裝置 frames
+- **THEN** parser 會為兩筆 frame 回傳不同的 `AnrotFrame` 物件
+- **AND** 解析第二筆 frame 不會覆寫第一筆 frame 的量測內容
 
 ### Requirement: 支援的單一裝置 ANROT payloads
 Binary parser SHALL 使用各格式專屬的 scale factors，將支援的 `0x91`、`0x92` 與 `0x81` payloads 解碼為其中可用的 timestamp、acceleration、angular velocity、magnetic field、orientation、environment、navigation 與 status 欄位。

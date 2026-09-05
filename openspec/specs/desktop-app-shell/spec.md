@@ -5,10 +5,12 @@
 | BAP | Desktop App 與本專案的正式名稱，全名為 Boxing Analysis Platform。 |
 | Desktop App | 安裝在 user 電腦上的 BAP 桌面應用程式。 |
 | 主畫面 | user 登入後看到的第一個功能頁面。 |
-| 拳擊測量項目 | 出拳次數、出拳速度、出拳力量、出拳軌跡及拳型辨識。 |
-| 待開發 | 畫面入口已存在，但本次不提供資料錄製或分析結果。 |
+| 拳擊測量項目 | 出拳次數、出拳速度、出拳力量、出拳軌跡及拳種辨識。 |
+| 待開發 | 畫面入口與前置設定已存在，但本次不會錄製拳擊資料或產生分析結果。 |
 | Windows 安裝版本 | user 不需要先安裝 Python，就能在支援的 Windows 電腦安裝及啟動的應用程式版本。 |
 | Public API URL | Desktop App 呼叫遠端後端時使用的公開 HTTPS 網址：`https://imuapp.lab2312.cs.nthu.edu.tw/api/`。 |
+| 拳種辨識 | 根據量測資料辨識出拳種類的分析項目；舊介面曾稱為「拳型辨識」。 |
+| 項目頁面 | user 從主畫面或側邊導覽選擇單一拳擊測量項目後看到的頁面。 |
 
 ## Purpose
 
@@ -25,7 +27,7 @@ flowchart TD
     HOME --> SPEED[出拳速度]
     HOME --> FORCE[出拳力量]
     HOME --> PATH[出拳軌跡]
-    HOME --> TYPE[拳型辨識]
+    HOME --> TYPE[拳種辨識]
     COUNT & SPEED & FORCE & PATH & TYPE --> DISCOVERY[自動探索 IMU 來源]
     DISCOVERY --> PENDING[顯示待開發]
 ```
@@ -55,17 +57,19 @@ Desktop App MUST 在 user 完成登入或成功恢復登入狀態後顯示主畫
 - **AND** Desktop App 顯示主畫面
 
 ### Requirement: 拳擊測量項目分開呈現
-Desktop App MUST 將出拳次數、出拳速度、出拳力量、出拳軌跡及拳型辨識分成五個獨立入口，不得提供同時選擇兩個以上項目的量測流程。
+Desktop App MUST 將出拳次數、出拳速度、出拳力量、出拳軌跡及拳種辨識分成五個獨立入口，不得提供同時選擇兩個以上項目的量測流程；所有 user 可見位置 MUST 使用「拳種辨識」，不得再顯示「拳型辨識」。
 
 #### Scenario: 查看拳擊測量項目
 - **WHEN** user 查看主畫面或拳擊測量導覽
 - **THEN** Desktop App 分別顯示五個拳擊測量項目
 - **AND** 每個項目都標示「待開發」
+- **AND** 第五個項目顯示為「拳種辨識」
 
 #### Scenario: 進入單一拳擊項目
 - **WHEN** user 點選一個拳擊測量項目
 - **THEN** Desktop App 只為該項目啟動 IMU 來源探索流程
 - **AND** Desktop App 不要求 user 同時選擇其他拳擊測量項目
+- **AND** 項目頁面標題與 user 所選的項目一致
 
 ### Requirement: 待開發項目不得假裝已有分析功能
 Desktop App MUST 在完成 IMU 來源選擇後顯示該拳擊測量項目仍待開發，且不得開始拳擊資料錄製、產生分析數值或顯示假結果。
@@ -74,7 +78,7 @@ Desktop App MUST 在完成 IMU 來源選擇後顯示該拳擊測量項目仍待�
 - **WHEN** user 為一個拳擊測量項目選好 IMU 來源
 - **THEN** Desktop App 顯示該項目「待開發」
 - **AND** Desktop App 不開始拳擊資料錄製
-- **AND** Desktop App 不顯示力量、速度、次數、軌跡或拳型結果
+- **AND** Desktop App 不顯示力量、速度、次數、軌跡或拳種結果
 
 ### Requirement: 介面使用白話繁體中文
 Desktop App MUST 以繁體中文及容易理解的文字呈現主要操作、狀態與錯誤；Port、Baud rate、Group ID、Node ID 等專有名詞可以保留英文。
