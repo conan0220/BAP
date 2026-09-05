@@ -6,6 +6,8 @@
 | GitHub Release | user 可從 GitHub 下載指定 Desktop 版本 Installer 的發布頁面。 |
 | Draft Release | 尚未公開給 user、可先加入 Asset 與 metadata 的 GitHub Release。 |
 | app_releases | Backend Database 中提供 Desktop 更新檢查所需的版本紀錄。 |
+| Desktop 版本來源 | `bap_desktop/VERSION`，是 Desktop Installer、GitHub Release tag 與 App 執行時版本的唯一來源。 |
+| Runtime 版本 | user 實際啟動已安裝 App 時，App 回報的 Desktop 版本。 |
 
 ## Purpose
 
@@ -29,12 +31,20 @@ CD MUST 從 Candidate 取得 CI 已驗證的 Installer 與 checksum，且 MUST N
 
 ### Requirement: 每個 Desktop 版本必須唯一且可追溯
 
-Desktop version、tag、Installer、Source Tree SHA 與 Promotion record MUST 形成唯一對應。
+Desktop version、tag、Installer、Runtime 版本、Source Tree SHA 與 Promotion record MUST 形成唯一對應。Desktop version MUST 讀取 `bap_desktop/VERSION`，不得從 `pyproject.toml` 或其他 Desktop source code 取得另一個版本號。Backend Release MUST 繼續使用 Git SHA 識別。
 
 #### Scenario: 發布新版本
 
 - **WHEN** Candidate version 尚未被使用且 metadata 完整
-- **THEN** 系統 MUST 建立 `desktop-v<version>` Release，附加 Installer、checksum與來源資訊
+- **THEN** 系統 MUST 使用 `bap_desktop/VERSION` 建立 `desktop-v<version>` Release
+- **AND** Installer filename、Installer metadata 與 Release tag MUST 使用相同版本
+- **AND** Release MUST 附加 Installer、checksum 與來源資訊
+
+#### Scenario: Candidate 版本不一致
+
+- **WHEN** Candidate manifest、Installer filename、Installer metadata 或 Runtime 版本與 `bap_desktop/VERSION` 不一致
+- **THEN** CD MUST 停止發布
+- **AND** CD MUST NOT 自行猜測或改寫版本號
 
 #### Scenario: Version 或 tag 已存在
 

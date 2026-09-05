@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from bap_desktop.api_client import ApiUnavailableError
@@ -14,7 +13,12 @@ from bap_desktop.services.imu_diagnostics import ImuDiagnosticsService
 from bap_desktop.services.imu_discovery import ImuDiscoveryService
 from bap_desktop.services.session import SessionService
 from bap_desktop.services.shutdown import ShutdownCoordinator
-from bap_desktop.services.update import UpdateResult, UpdateService
+from bap_desktop.services.update import (
+    UpdateInstallError,
+    UpdateInstaller,
+    UpdateResult,
+    UpdateService,
+)
 from bap_desktop.ui.auth import AuthPage
 from bap_desktop.ui.app_shell import AppShell
 from bap_desktop.ui.home import HomePage
@@ -39,6 +43,32 @@ class _UpdateWorker(QRunnable):
         self.signals.finished.emit(self.service.check())
 
 
+class _InstallSignals(QObject):
+    progress = Signal(int)
+    finished = Signal()
+    failed = Signal(str)
+
+
+class _InstallWorker(QRunnable):
+    def __init__(self, installer: UpdateInstaller, result: UpdateResult) -> None:
+        super().__init__()
+        self.installer = installer
+        self.result = result
+        self.signals = _InstallSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.installer.download_and_launch(
+                self.result,
+                progress=self.signals.progress.emit,
+            )
+        except UpdateInstallError as error:
+            self.signals.failed.emit(str(error))
+            return
+        self.signals.finished.emit()
+
+
 class MainWindow(QMainWindow):
     """Show login, home, diagnostics, or exactly one punch item page."""
 
@@ -49,7 +79,8 @@ class MainWindow(QMainWindow):
         diagnostic_service_factory: Callable[[], ImuDiagnosticsService] = ImuDiagnosticsService,
         discovery_service_factory: Callable[[], ImuDiscoveryService] = ImuDiscoveryService,
         update_service: UpdateService | None = None,
-        url_opener: Callable[[QUrl], object] = QDesktopServices.openUrl,
+        update_installer: UpdateInstaller | None = None,
+        quit_for_update: Callable[[], None] | None = None,
         restore_session: bool = True,
         parent=None,
     ) -> None:
@@ -58,8 +89,10 @@ class MainWindow(QMainWindow):
         self.diagnostic_service_factory = diagnostic_service_factory
         self.discovery_service_factory = discovery_service_factory
         self.update_service = update_service
-        self.url_opener = url_opener
+        self.update_installer = update_installer
+        self.quit_for_update = quit_for_update or self._quit_application
         self.shutdown_coordinator = ShutdownCoordinator()
+        self._install_worker: _InstallWorker | None = None
         self._feature_wrapper: QWidget | None = None
         self._feature_page: QWidget | None = None
 
@@ -88,8 +121,10 @@ class MainWindow(QMainWindow):
         self.app_shell.diagnostics_requested.connect(self.show_diagnostics)
         self.app_shell.punch_item_requested.connect(self.show_punch_item)
         self.app_shell.logout_requested.connect(self.logout)
-        self.update_banner.download_requested.connect(self._open_update_url)
+        self.update_banner.install_requested.connect(self._start_update_install)
         self.shutdown_coordinator.register(self.session.close)
+        if self.update_installer is not None:
+            self.shutdown_coordinator.register(self.update_installer.close)
 
         restored = False
         if restore_session:
@@ -115,9 +150,35 @@ class MainWindow(QMainWindow):
     def _show_update_result(self, result: UpdateResult) -> None:
         self.update_banner.show_result(result)
 
+    @Slot(object)
+    def _start_update_install(self, result: UpdateResult) -> None:
+        if self.update_installer is None or self._install_worker is not None:
+            self.update_banner.show_install_failed()
+            return
+        self.update_banner.show_download_progress()
+        worker = _InstallWorker(self.update_installer, result)
+        self._install_worker = worker
+        worker.signals.progress.connect(self.update_banner.show_download_progress)
+        worker.signals.failed.connect(self._update_install_failed)
+        worker.signals.finished.connect(self._update_install_started)
+        QThreadPool.globalInstance().start(worker)
+
     @Slot(str)
-    def _open_update_url(self, url: str) -> None:
-        self.url_opener(QUrl(url))
+    def _update_install_failed(self, _message: str) -> None:
+        self._install_worker = None
+        self.update_banner.show_install_failed()
+
+    @Slot()
+    def _update_install_started(self) -> None:
+        self._install_worker = None
+        self.update_banner.show_installing()
+        QTimer.singleShot(150, self.quit_for_update)
+
+    @staticmethod
+    def _quit_application() -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     @Slot()
     def show_home(self) -> None:

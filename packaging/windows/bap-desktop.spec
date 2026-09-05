@@ -3,7 +3,7 @@
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 
-datas = collect_data_files("bap_desktop", includes=["resources/**"])
+datas = collect_data_files("bap_desktop", includes=["resources/**", "VERSION"])
 datas += collect_data_files("PySide6", includes=["translations/**"])
 binaries = collect_dynamic_libs("PySide6", search_patterns=["plugins/platforms/*"])
 binaries += collect_dynamic_libs(

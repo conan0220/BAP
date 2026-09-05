@@ -1,6 +1,6 @@
 #define MyAppName "BAP"
 #define MyAppFullName "Boxing Analysis Platform"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "__BAP_VERSION__"
 #define MyAppExeName "BAP.exe"
 
 [Setup]
@@ -34,6 +34,14 @@ Name: "desktopicon"; Description: "建立桌面捷徑"; GroupDescription: "其�
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "啟動 BAP"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: IsAutomaticUpdate
+
+[Code]
+function IsAutomaticUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:BAPAUTOSTART|0}') = '1';
+end;
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\BAP\temp\imu-diagnostics"
+Type: filesandordirs; Name: "{localappdata}\BAP\updates"
