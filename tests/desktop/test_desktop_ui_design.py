@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QBoxLayout, QLabel, QScrollArea
+from PySide6.QtWidgets import QBoxLayout, QLabel, QScrollArea, QWidget
 
 from bap_desktop.services.imu_diagnostics import (
     DiagnosticCsvFile,
@@ -15,6 +15,7 @@ from bap_desktop.services.imu_discovery import DiscoveryResult, ImuSource
 from bap_desktop.services.imu_scan import ConnectionType
 from bap_desktop.ui.auth import AuthPage
 from bap_desktop.ui.components import PageHeader
+from bap_desktop.ui.home import HomePage
 from bap_desktop.ui.imu_diagnostics import ImuDiagnosticsPage
 from bap_desktop.ui.main_window import MainWindow
 from bap_desktop.ui.punch_items import PunchItemPage
@@ -298,70 +299,98 @@ def test_text_controls_are_not_constrained_by_fixed_heights(qtbot) -> None:
 
 
 @pytest.mark.scenario("desktop-ui-design", "user 調整 App 視窗大小")
-def test_main_pages_and_fields_reflow_with_available_width(qtbot) -> None:
+def test_main_window_reflows_using_actual_available_width(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
     window.show()
 
     home = window.home_page
-    window.resize(900, 650)
-    qtbot.wait(10)
-    assert home.punch_column_count == 1
-    assert home.diagnostic_layout.getItemPosition(
-        home.diagnostic_layout.indexOf(home.diagnostics_button)
-    )[:2] == (2, 0)
-    window.resize(1_500, 900)
-    qtbot.wait(10)
-    assert home.punch_column_count == 3
-    assert home.diagnostic_layout.getItemPosition(
-        home.diagnostic_layout.indexOf(home.diagnostics_button)
-    )[:2] == (0, 1)
+    def assert_actual_layout() -> None:
+        # Windows may clamp top-level windows to the runner's virtual screen.
+        # The layout must follow the size actually allocated, not resize()'s request.
+        content_width = home.width() - 56
+        columns = 1 if content_width < 700 else 2 if content_width < 1000 else 3
+        assert home.punch_column_count == columns
+        position = (2, 0) if content_width < 700 else (0, 1)
+        assert home.diagnostic_layout.getItemPosition(
+            home.diagnostic_layout.indexOf(home.diagnostics_button)
+        )[:2] == position
+
+    for width, height in ((900, 650), (1500, 900), (900, 650)):
+        window.resize(width, height)
+        qtbot.waitUntil(assert_actual_layout)
+
+
+@pytest.mark.scenario("desktop-ui-design", "user 調整 App 視窗大小")
+def test_main_pages_and_fields_reflow_with_available_width(qtbot) -> None:
+    # Non-native child widgets can be wider than their host viewport. This
+    # exercises real Qt resize events without depending on monitor resolution.
+    host = QWidget()
+    qtbot.addWidget(host)
+    host.resize(900, 650)
+    host.show()
+
+    def mount(page):
+        page.setParent(host)
+        page.show()
+        return page
+
+    home = mount(HomePage())
+    for width, columns in ((600, 1), (900, 2), (1200, 3), (900, 2), (600, 1)):
+        home.resize(width, 800)
+
+        def assert_home_layout() -> None:
+            assert home.width() == width
+            assert home.punch_column_count == columns
+            for index, button in enumerate(home.punch_buttons.values()):
+                assert home.punch_grid.getItemPosition(
+                    home.punch_grid.indexOf(button)
+                )[:2] == (index // columns, index % columns)
+            assert home.diagnostic_layout.getItemPosition(
+                home.diagnostic_layout.indexOf(home.diagnostics_button)
+            )[:2] == ((2, 0) if columns == 1 else (0, 1))
+
+        qtbot.waitUntil(assert_home_layout)
+    home.hide()
 
     auth = AuthPage(SessionStub())  # type: ignore[arg-type]
-    qtbot.addWidget(auth)
-    auth.show()
+    mount(auth)
     auth.resize(700, 650)
-    qtbot.wait(10)
-    assert auth.card_layout.direction() == QBoxLayout.Direction.TopToBottom
+    qtbot.waitUntil(lambda: auth.card_layout.direction() == QBoxLayout.Direction.TopToBottom)
     auth.resize(900, 650)
-    qtbot.wait(10)
-    assert auth.card_layout.direction() == QBoxLayout.Direction.LeftToRight
+    qtbot.waitUntil(lambda: auth.card_layout.direction() == QBoxLayout.Direction.LeftToRight)
+    auth.hide()
 
     header = PageHeader("頁面標題", "說明文字")
     header.add_action(QLabel("頁面操作"))
-    qtbot.addWidget(header)
-    header.show()
+    mount(header)
     header.resize(560, 160)
-    qtbot.wait(10)
-    assert header.root_layout.direction() == QBoxLayout.Direction.TopToBottom
+    qtbot.waitUntil(lambda: header.root_layout.direction() == QBoxLayout.Direction.TopToBottom)
     header.resize(900, 160)
-    qtbot.wait(10)
-    assert header.root_layout.direction() == QBoxLayout.Direction.LeftToRight
+    qtbot.waitUntil(lambda: header.root_layout.direction() == QBoxLayout.Direction.LeftToRight)
+    header.hide()
 
     punch = make_punch_page(qtbot, "出拳次數")
     punch._started = True
-    punch.show()
+    mount(punch)
     row_layout, _label, selector = punch._assignment_rows[0]
     punch.resize(600, 650)
-    qtbot.wait(10)
-    assert row_layout.getItemPosition(row_layout.indexOf(selector))[:2] == (1, 0)
+    qtbot.waitUntil(lambda: row_layout.getItemPosition(row_layout.indexOf(selector))[:2] == (1, 0))
     punch.resize(900, 650)
-    qtbot.wait(10)
-    assert row_layout.getItemPosition(row_layout.indexOf(selector))[:2] == (0, 1)
+    qtbot.waitUntil(lambda: row_layout.getItemPosition(row_layout.indexOf(selector))[:2] == (0, 1))
+    punch.hide()
 
     diagnostics = ImuDiagnosticsPage(DiagnosticsStub())  # type: ignore[arg-type]
-    qtbot.addWidget(diagnostics)
-    diagnostics.show()
+    diagnostics._started = True  # Layout test: never start a real scan or worker.
+    mount(diagnostics)
     diagnostics.resize(560, 650)
-    qtbot.wait(10)
-    assert diagnostics.summary.getItemPosition(
+    qtbot.waitUntil(lambda: diagnostics.summary.getItemPosition(
         diagnostics.summary.indexOf(diagnostics.connected_count_card)
-    )[:2] == (1, 0)
+    )[:2] == (1, 0))
     diagnostics.resize(900, 650)
-    qtbot.wait(10)
-    assert diagnostics.summary.getItemPosition(
+    qtbot.waitUntil(lambda: diagnostics.summary.getItemPosition(
         diagnostics.summary.indexOf(diagnostics.connected_count_card)
-    )[:2] == (0, 1)
+    )[:2] == (0, 1))
 
 
 @pytest.mark.scenario("desktop-ui-design", "IMU 測試進行中顯示完整百分比")
