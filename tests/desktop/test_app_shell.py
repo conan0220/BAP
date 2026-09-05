@@ -101,7 +101,8 @@ def test_successful_restore_opens_authenticated_home(qtbot) -> None:
     window = MainWindow(session)  # type: ignore[arg-type]
     qtbot.addWidget(window)
 
-    assert window.stack.currentWidget() is window.home_page
+    assert window.stack.currentWidget() is window.app_shell
+    assert window.app_shell.content_stack.currentWidget() is window.home_page
     assert tuple(window.home_page.punch_buttons) == text.PUNCH_ITEMS
     assert all(text.PENDING in button.text() for button in window.home_page.punch_buttons.values())
 
@@ -114,7 +115,8 @@ def test_successful_login_opens_home_and_logout_returns_to_login(qtbot) -> None:
 
     assert window.stack.currentWidget() is window.auth_page
     window.auth_page.authenticated.emit()
-    assert window.stack.currentWidget() is window.home_page
+    assert window.stack.currentWidget() is window.app_shell
+    assert window.app_shell.content_stack.currentWidget() is window.home_page
     window.logout()
     assert session.logged_out == 1
     assert window.stack.currentWidget() is window.auth_page
@@ -137,13 +139,15 @@ def test_only_one_punch_item_page_is_open_at_a_time(qtbot) -> None:
     window.home_page.punch_buttons["出拳速度"].click()
     assert isinstance(window._feature_page, PunchItemPage)
     assert window._feature_page.item_name == "出拳速度"
-    assert window.stack.count() == 3
+    assert window.stack.count() == 2
+    assert window.app_shell.content_stack.count() == 2
 
     window.show_home()
     window.home_page.punch_buttons["出拳力量"].click()
     assert isinstance(window._feature_page, PunchItemPage)
     assert window._feature_page.item_name == "出拳力量"
-    assert window.stack.count() == 3
+    assert window.stack.count() == 2
+    assert window.app_shell.content_stack.count() == 2
     assert services[0].clears >= 1
 
 
@@ -191,4 +195,5 @@ def test_traditional_chinese_resource_keeps_domain_terms_consistent() -> None:
     )
     assert "IMU 連線狀態" in combined
     assert "Port" in combined
-    assert text.PUNCH_ITEMS == ("出拳次數", "出拳速度", "出拳力量", "出拳軌跡", "拳型辨識")
+    assert text.PUNCH_ITEMS == ("出拳次數", "出拳速度", "出拳力量", "出拳軌跡", "拳種辨識")
+    assert "拳型辨識" not in combined

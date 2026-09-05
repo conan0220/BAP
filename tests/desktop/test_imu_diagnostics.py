@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from anrot_imu_driver.parsers.anrot_serial_parser import AnrotSerialParser
-from bap_desktop.services.imu_diagnostics import ImuDiagnosticsService, REPORT_COLUMNS
+from bap_desktop.services.imu_diagnostics import (
+    ImuDiagnosticsService,
+    REPORT_COLUMNS,
+    WIRED_CSV_HEADER,
+    WIRELESS_CSV_HEADER,
+)
 from bap_desktop.services.imu_scan import (
     ConnectionType,
     PortScanResult,
@@ -15,6 +20,7 @@ from bap_desktop.services.imu_scan import (
     ScanStatus,
 )
 from bap_desktop.ui.imu_diagnostics import ImuDiagnosticsPage
+from tests.helpers import build_gateway_frame, build_gateway_node
 
 
 def result_with_frames(port: str, raw: bytes, *, duration: float = 5.0) -> PortScanResult:
@@ -51,9 +57,11 @@ def test_report_and_csv_use_rows_over_actual_duration(tmp_path: Path, hi91_frame
     assert report.rows[0].as_display_values()[0:4] == ("COM3", "ANROT", "有線連接", "921600")
     assert report.csv_path is not None
     with report.csv_path.open(encoding="utf-8-sig", newline="") as csv_file:
-        rows = list(csv.DictReader(csv_file))
-    assert len(rows) == 2
-    assert {row["port"] for row in rows} == {"COM3"}
+        rows = list(csv.reader(csv_file))
+    assert tuple(rows[0]) == WIRED_CSV_HEADER
+    assert len(rows) == 3
+    assert report.csv_path.name.startswith("imu_")
+    assert report.csv_path.name.endswith("_COM3_wired.csv")
 
 
 @pytest.mark.scenario("imu-connection-diagnostics", "按下重新測試")
@@ -81,6 +89,7 @@ def test_no_ports_produces_empty_report_without_csv(tmp_path: Path) -> None:
     )
     report = service.run()
     assert report.rows == ()
+    assert report.csv_files == ()
     assert report.csv_path is None
 
 
@@ -132,3 +141,60 @@ def test_sample_rate_uses_all_raw_rows_even_when_values_repeat(tmp_path: Path, h
     assert report.csv_path is not None
     with report.csv_path.open(encoding="utf-8-sig", newline="") as csv_file:
         assert sum(1 for _ in csv.DictReader(csv_file)) == 2000
+
+
+@pytest.mark.scenario("imu-connection-diagnostics", "同一個無線封包包含多個 Node")
+@pytest.mark.scenario("imu-connection-diagnostics", "產生無線接收器 CSV")
+def test_wireless_csv_matches_reference_schema_and_counts_packets_not_nodes(tmp_path: Path) -> None:
+    raw_packet = build_gateway_frame(
+        gateway_id=3,
+        timestamp_ms=142970,
+        nodes=(build_gateway_node(0), build_gateway_node(1)),
+    )
+    service = ImuDiagnosticsService(
+        adapter=object(),
+        duration_seconds=2,
+        temp_dir=tmp_path,
+        wall_clock=lambda: 1_788_528_607,
+        scan=lambda *args, **kwargs: [
+            result_with_frames("COM7", raw_packet * 10, duration=2.0)
+        ],
+    )
+
+    report = service.run()
+
+    assert report.rows[0].sample_rate_hz == 5.0
+    assert report.csv_path is not None
+    assert report.csv_path.name.endswith("_COM7_wireless.csv")
+    with report.csv_path.open(encoding="utf-8-sig", newline="") as csv_file:
+        rows = list(csv.reader(csv_file))
+    assert tuple(rows[0]) == WIRELESS_CSV_HEADER
+    assert len(rows) == 11
+    assert rows[1][:3] == ["142970", "1788528607", "0"]
+    assert rows[1][2 + 17] == "1"
+
+
+@pytest.mark.scenario("imu-connection-diagnostics", "產生有線 IMU CSV")
+@pytest.mark.scenario("imu-connection-diagnostics", "同時測試多個已連線 Port")
+def test_each_connected_port_gets_its_own_schema_file(tmp_path: Path, hi91_frame) -> None:
+    wireless = build_gateway_frame(nodes=(build_gateway_node(2), build_gateway_node(3)))
+    service = ImuDiagnosticsService(
+        adapter=object(),
+        temp_dir=tmp_path / "managed",
+        scan=lambda *args, **kwargs: [
+            result_with_frames("COM1", hi91_frame),
+            result_with_frames("COM7", wireless),
+        ],
+    )
+
+    report = service.run()
+    exported = service.export_csv_files(tmp_path / "exported")
+
+    assert len(report.csv_files) == 2
+    assert report.csv_path is None
+    assert {item.connection_type for item in report.csv_files} == {
+        ConnectionType.WIRED,
+        ConnectionType.WIRELESS_RECEIVER,
+    }
+    assert len(exported) == 2
+    assert all(path.exists() for path in exported)

@@ -27,7 +27,7 @@ PUNCH_ITEMS = (
     "出拳速度",
     "出拳力量",
     "出拳軌跡",
-    "拳型辨識",
+    "拳種辨識",
 )
 
 DIAGNOSTIC_READY = "準備測試所有 Port"
@@ -40,9 +40,14 @@ EXPORT_CSV = "匯出 CSV"
 
 DISCOVERY_READY = "準備確認 IMU"
 DISCOVERY_RUNNING = "正在確認 IMU，請稍後。"
-DISCOVERY_SELECT = "請選擇這個拳擊項目要使用的一個 IMU 來源。"
+DISCOVERY_SELECT = "請為這個拳擊項目的每個位置指定 IMU。"
 DISCOVERY_NOT_FOUND = "找不到可用的 IMU"
 DISCOVERY_RETRY = "再次確認"
+DISCOVERY_DUPLICATE = "同一顆 IMU 不能同時指定給兩個位置。"
+DISCOVERY_INSUFFICIENT = "可用 IMU 數量不足，請檢查裝置後再次確認。"
+DISCOVERY_CONFIGURATION_PENDING = "IMU 配置待決定"
+IMU_PLACEHOLDER = "請選擇掃描到的 IMU"
+SERVER_CONNECTED = "伺服器已連線"
 
 UPDATE_CHECKING = "正在背景檢查更新…"
 UPDATE_LATEST = "已是最新版本"

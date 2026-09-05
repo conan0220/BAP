@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from bap_desktop.api_client import ApiUnavailableError
 from bap_desktop.resources import text
@@ -16,10 +16,12 @@ from bap_desktop.services.session import SessionService
 from bap_desktop.services.shutdown import ShutdownCoordinator
 from bap_desktop.services.update import UpdateResult, UpdateService
 from bap_desktop.ui.auth import AuthPage
+from bap_desktop.ui.app_shell import AppShell
 from bap_desktop.ui.home import HomePage
 from bap_desktop.ui.imu_diagnostics import ImuDiagnosticsPage
 from bap_desktop.ui.punch_items import PunchItemPage
 from bap_desktop.ui.update_banner import UpdateBanner
+from bap_desktop.ui.styles import apply_bap_style
 
 
 class _UpdateSignals(QObject):
@@ -61,11 +63,13 @@ class MainWindow(QMainWindow):
         self._feature_wrapper: QWidget | None = None
         self._feature_page: QWidget | None = None
 
+        apply_bap_style(QApplication.instance())
         self.stack = QStackedWidget()
         self.auth_page = AuthPage(session)
         self.home_page = HomePage()
+        self.app_shell = AppShell(self.home_page)
         self.stack.addWidget(self.auth_page)
-        self.stack.addWidget(self.home_page)
+        self.stack.addWidget(self.app_shell)
         self.update_banner = UpdateBanner()
         root = QWidget()
         root_layout = QVBoxLayout(root)
@@ -74,12 +78,16 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.stack)
         self.setCentralWidget(root)
         self.setWindowTitle("BAP")
-        self.resize(900, 640)
+        self.setMinimumSize(900, 650)
+        self.resize(1040, 720)
 
         self.auth_page.authenticated.connect(self.show_home)
         self.home_page.open_diagnostics.connect(self.show_diagnostics)
         self.home_page.open_punch_item.connect(self.show_punch_item)
-        self.home_page.logout_requested.connect(self.logout)
+        self.app_shell.home_requested.connect(self.show_home)
+        self.app_shell.diagnostics_requested.connect(self.show_diagnostics)
+        self.app_shell.punch_item_requested.connect(self.show_punch_item)
+        self.app_shell.logout_requested.connect(self.logout)
         self.update_banner.download_requested.connect(self._open_update_url)
         self.shutdown_coordinator.register(self.session.close)
 
@@ -89,7 +97,7 @@ class MainWindow(QMainWindow):
                 restored = self.session.restore()
             except ApiUnavailableError:
                 restored = False
-        self.stack.setCurrentWidget(self.home_page if restored else self.auth_page)
+        self.stack.setCurrentWidget(self.app_shell if restored else self.auth_page)
         if self.update_service is not None:
             self.update_banner.message.setText(text.UPDATE_CHECKING)
             self.update_banner.show()
@@ -114,17 +122,28 @@ class MainWindow(QMainWindow):
     @Slot()
     def show_home(self) -> None:
         self._discard_feature_page()
-        self.stack.setCurrentWidget(self.home_page)
+        username = self.auth_page.login_username.text().strip() or None
+        self.app_shell.set_account_name(username)
+        self.app_shell.show_home()
+        self.stack.setCurrentWidget(self.app_shell)
 
     @Slot()
     def show_diagnostics(self) -> None:
-        self._show_feature(ImuDiagnosticsPage(service=self.diagnostic_service_factory()))
+        self._show_feature(
+            ImuDiagnosticsPage(service=self.diagnostic_service_factory()),
+            key="diagnostics",
+            title=text.IMU_DIAGNOSTICS,
+        )
 
     @Slot(str)
     def show_punch_item(self, item_name: str) -> None:
         if item_name not in text.PUNCH_ITEMS:
             return
-        self._show_feature(PunchItemPage(item_name, service=self.discovery_service_factory()))
+        self._show_feature(
+            PunchItemPage(item_name, service=self.discovery_service_factory()),
+            key=f"punch:{item_name}",
+            title=item_name,
+        )
 
     @Slot()
     def logout(self) -> None:
@@ -132,33 +151,26 @@ class MainWindow(QMainWindow):
         self.session.logout()
         self.stack.setCurrentWidget(self.auth_page)
 
-    def _show_feature(self, page: QWidget) -> None:
+    def _show_feature(self, page: QWidget, *, key: str, title: str) -> None:
         self._discard_feature_page()
-        wrapper = QWidget()
-        layout = QVBoxLayout(wrapper)
-        back = QPushButton(text.BACK_HOME)
-        back.clicked.connect(self.show_home)
-        layout.addWidget(back)
-        layout.addWidget(page)
-        self._feature_wrapper = wrapper
+        self._feature_wrapper = page
         self._feature_page = page
         shutdown = getattr(page, "shutdown", None)
         if callable(shutdown):
             self.shutdown_coordinator.register(shutdown)
-        self.stack.addWidget(wrapper)
-        self.stack.setCurrentWidget(wrapper)
+        self.app_shell.set_feature(page, key=key, title=title)
+        self.stack.setCurrentWidget(self.app_shell)
 
     def _discard_feature_page(self) -> None:
         page = self._feature_page
-        wrapper = self._feature_wrapper
         if page is not None:
             shutdown = getattr(page, "shutdown", None)
             if callable(shutdown):
                 shutdown()
                 self.shutdown_coordinator.unregister(shutdown)
-        if wrapper is not None:
-            self.stack.removeWidget(wrapper)
-            wrapper.deleteLater()
+        removed = self.app_shell.remove_feature()
+        if removed is not None:
+            removed.deleteLater()
         self._feature_page = None
         self._feature_wrapper = None
 
