@@ -7,6 +7,8 @@
 | CI Candidate | 同一次 CI 建立並驗證的 Backend ZIP、Desktop Installer、checksums、manifest 與 test summary。 |
 | docs-only | 只修改文件，不會改變程式、Build、部署或 Workflow 行為的 PR。 |
 | Production-like E2E | 在乾淨 Runner 從實際 Artifact 安裝前後端，再透過真正 HTTP API 驗證 user flow。 |
+| Desktop 版本來源 | `bap_desktop/VERSION`，是 Desktop Installer、Candidate metadata 與 App 執行時版本的唯一來源。 |
+| Runtime 版本 | CI 安裝並啟動 Candidate 後，由 App 本身回報的 Desktop 版本。 |
 
 ## Purpose
 
@@ -65,6 +67,13 @@ CI MUST 從剛建立的 Backend ZIP 與 Desktop Installer安裝測試環境，�
 
 - **WHEN** Desktop Installer 建立完成
 - **THEN** CI MUST silent install、啟動已安裝 App，並在測試後完成 uninstall
+
+#### Scenario: 驗證已安裝 App 的版本
+
+- **WHEN** CI 已完成 Desktop Installer 的 silent install
+- **THEN** CI MUST 從已安裝的 App 讀取 Runtime 版本
+- **AND** Runtime 版本、Installer filename、Installer metadata、Candidate manifest 與 `bap_desktop/VERSION` MUST 全部一致
+- **AND** 任一版本不一致時 CI MUST 失敗
 
 #### Scenario: 執行真實 HTTP user flow
 

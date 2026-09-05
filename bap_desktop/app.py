@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from pathlib import Path
 
 from bap_desktop import APP_NAME, PRODUCT_NAME, __version__
 
@@ -48,6 +49,12 @@ def _run_api_e2e() -> int:
 def main() -> int:
     """Start the Qt application while keeping imports lightweight for tooling."""
 
+    if "--write-version" in sys.argv:
+        index = sys.argv.index("--write-version")
+        if index + 1 >= len(sys.argv):
+            return 2
+        Path(sys.argv[index + 1]).write_text(__version__, encoding="utf-8")
+        return 0
     if "--api-e2e-test" in sys.argv:
         return _run_api_e2e()
 
@@ -56,7 +63,7 @@ def main() -> int:
     from bap_desktop.api_client import AuthApiClient, ReleaseApiClient
     from bap_desktop.services.imu_diagnostics import ImuDiagnosticsService
     from bap_desktop.services.session import SessionService
-    from bap_desktop.services.update import UpdateService
+    from bap_desktop.services.update import UpdateInstaller, UpdateService
     from bap_desktop.settings import DesktopSettings
     from bap_desktop.ui.main_window import MainWindow
     from bap_desktop.ui.styles import apply_bap_style
@@ -76,10 +83,12 @@ def main() -> int:
         current_version=__version__,
         platform="windows",
     )
+    update_installer = UpdateInstaller(settings.update_dir)
     window = MainWindow(
         session,
         diagnostic_service_factory=lambda: ImuDiagnosticsService(temp_dir=settings.temp_imu_dir),
         update_service=None if smoke_test else update_service,
+        update_installer=None if smoke_test else update_installer,
         restore_session=not smoke_test,
     )
     window.show()

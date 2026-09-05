@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import pytest
 
 from bap_desktop.api_client import ApiUnavailableError, ReleaseApiClient, ReleaseData
 from bap_desktop.resources import text
-from bap_desktop.services.update import UpdateResult, UpdateService, UpdateStatus
+from bap_desktop.services.update import (
+    UpdateInstallError,
+    UpdateInstaller,
+    UpdateResult,
+    UpdateService,
+    UpdateStatus,
+)
 from bap_desktop.ui.main_window import MainWindow
 
 
@@ -90,6 +98,7 @@ def test_update_service_reports_newer_supported_windows_release() -> None:
 
     assert result.status is UpdateStatus.AVAILABLE
     assert result.download_url == DOWNLOAD_URL
+    assert result.sha256 == "a" * 64
     assert client.platforms == ["windows"]
 
 
@@ -110,6 +119,7 @@ def test_update_service_rejects_wrong_platform_non_https_and_invalid_version() -
         _release(platform="linux"),
         _release(download_url="http://github.com/conan0220/BAP/releases/download/v/BAP.exe"),
         _release(version="not-a-version"),
+        _release(sha256="not-a-checksum"),
     )
     for release in releases:
         result = UpdateService(
@@ -141,16 +151,37 @@ class _ImmediateUpdateService:
         return self.result
 
 
+class _ImmediateInstaller:
+    def __init__(self, error: UpdateInstallError | None = None) -> None:
+        self.error = error
+        self.calls: list[UpdateResult] = []
+        self.closed = False
+
+    def download_and_launch(self, result: UpdateResult, *, progress=None) -> Path:
+        self.calls.append(result)
+        if self.error:
+            raise self.error
+        if progress:
+            progress(50)
+            progress(100)
+        return Path("BAP-Setup.exe")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 @pytest.mark.scenario("desktop-app-update-check", "user 選擇下載更新")
-def test_update_banner_does_not_block_login_and_opens_only_user_selected_url(qtbot) -> None:
-    opened = []
+def test_update_banner_does_not_block_login_and_installs_only_after_user_action(qtbot) -> None:
     service = _ImmediateUpdateService(
-        UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL)
+        UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL, "a" * 64)
     )
+    installer = _ImmediateInstaller()
+    quit_requests = []
     window = MainWindow(
         _Session(),  # type: ignore[arg-type]
         update_service=service,  # type: ignore[arg-type]
-        url_opener=lambda url: opened.append(url.toString()),
+        update_installer=installer,  # type: ignore[arg-type]
+        quit_for_update=lambda: quit_requests.append(True),
         restore_session=False,
     )
     qtbot.addWidget(window)
@@ -162,12 +193,85 @@ def test_update_banner_does_not_block_login_and_opens_only_user_selected_url(qtb
         and "目前版本：0.1.0" in window.update_banner.message.text()
         and "最新版本：0.2.0" in window.update_banner.message.text()
     )
-    assert opened == []
+    assert installer.calls == []
     assert "目前版本：0.1.0" in window.update_banner.message.text()
     assert "最新版本：0.2.0" in window.update_banner.message.text()
 
     window.update_banner.download_button.click()
-    assert opened == [DOWNLOAD_URL]
+    qtbot.waitUntil(lambda: installer.calls != [] and quit_requests == [True])
+    assert installer.calls[0].download_url == DOWNLOAD_URL
+    assert window.update_banner.message.text() == text.UPDATE_INSTALLING
+
+
+@pytest.mark.scenario("desktop-app-update-check", "Installer 通過完整性驗證")
+def test_update_installer_verifies_download_and_launches_silent_in_place_upgrade(tmp_path) -> None:
+    payload = b"signed installer bytes"
+    expected = hashlib.sha256(payload).hexdigest()
+    launched = []
+    progress = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == DOWNLOAD_URL
+        return httpx.Response(200, content=payload, headers={"content-length": str(len(payload))})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    installer = UpdateInstaller(
+        tmp_path,
+        client=client,
+        launcher=lambda path, arguments: launched.append((path, arguments)),
+    )
+    result = UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL, expected)
+
+    destination = installer.download_and_launch(result, progress=progress.append)
+
+    assert destination.read_bytes() == payload
+    assert launched == [(destination, UpdateInstaller.INSTALL_ARGUMENTS)]
+    assert progress[-1] == 100
+    assert "/BAPAUTOSTART=1" in launched[0][1]
+
+
+@pytest.mark.scenario("desktop-app-update-check", "Installer checksum 不符")
+def test_update_installer_rejects_bad_checksum_and_never_launches(tmp_path) -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=b"tampered"))
+    )
+    launched = []
+    installer = UpdateInstaller(
+        tmp_path,
+        client=client,
+        launcher=lambda path, arguments: launched.append((path, arguments)),
+    )
+    result = UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL, "a" * 64)
+
+    with pytest.raises(UpdateInstallError, match="SHA-256"):
+        installer.download_and_launch(result)
+
+    assert launched == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.scenario("desktop-app-update-check", "更新下載或啟動失敗")
+def test_update_failure_keeps_app_open_and_allows_retry(qtbot) -> None:
+    result = UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL, "a" * 64)
+    installer = _ImmediateInstaller(UpdateInstallError("offline"))
+    quit_requests = []
+    window = MainWindow(
+        _Session(),  # type: ignore[arg-type]
+        update_service=_ImmediateUpdateService(result),  # type: ignore[arg-type]
+        update_installer=installer,  # type: ignore[arg-type]
+        quit_for_update=lambda: quit_requests.append(True),
+        restore_session=False,
+    )
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitUntil(lambda: window.update_banner.download_button.isVisible())
+
+    window.update_banner.download_button.click()
+
+    qtbot.waitUntil(lambda: window.update_banner.message.text() == text.UPDATE_FAILED)
+    assert quit_requests == []
+    assert window.update_banner.download_button.isEnabled()
+    assert window.stack.currentWidget() is window.auth_page
 
 
 def test_offline_update_status_is_non_blocking_and_has_no_download(qtbot) -> None:

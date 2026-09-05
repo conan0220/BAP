@@ -6,6 +6,7 @@
 | Candidate Resolver | 從 master commit 找回 merged PR、成功 CI run 與唯一 Candidate 的流程。 |
 | Promotion Scope | 本次 master 內容需要部署 Backend、發布 Desktop、兩者都做或都不做的判定。 |
 | Fail Closed | 無法證明 Candidate 正確時直接停止，不猜測、不重建也不修改 Production。 |
+| Desktop 版本來源 | `bap_desktop/VERSION`，是 Desktop App 唯一的版本設定檔。 |
 
 ## Purpose
 
@@ -64,6 +65,13 @@ CI MUST 將 scope 寫入 manifest，CD MUST 重新計算並要求兩者一致。
 
 - **WHEN** 變更只影響 Desktop 或 Windows packaging
 - **THEN** CD MUST 只執行 Desktop Promotion
+
+#### Scenario: 只調整 Desktop 版本
+
+- **WHEN** PR 只修改 `bap_desktop/VERSION`
+- **THEN** CI 與 CD MUST 判定 `desktop_changed=true`
+- **AND** CI 與 CD MUST 判定 `backend_changed=false`
+- **AND** CD MUST NOT 因 Desktop 版本更新而部署 Backend
 
 #### Scenario: Shared dependency 變更
 

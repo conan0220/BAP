@@ -10,11 +10,11 @@ from bap_desktop.services.update import UpdateResult, UpdateStatus
 
 
 class UpdateBanner(QWidget):
-    download_requested = Signal(str)
+    install_requested = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._download_url: str | None = None
+        self._result: UpdateResult | None = None
         self.message = QLabel("")
         self.download_button = QPushButton(text.UPDATE_DOWNLOAD)
         self.later_button = QPushButton(text.UPDATE_LATER)
@@ -23,13 +23,20 @@ class UpdateBanner(QWidget):
         layout.addStretch(1)
         layout.addWidget(self.download_button)
         layout.addWidget(self.later_button)
-        self.download_button.clicked.connect(self._download)
+        self.download_button.clicked.connect(self._install)
         self.later_button.clicked.connect(self.hide)
+        self.download_button.hide()
+        self.later_button.hide()
         self.hide()
 
     def show_result(self, result: UpdateResult) -> None:
-        self._download_url = result.download_url
-        available = result.status is UpdateStatus.AVAILABLE and bool(result.download_url)
+        self._result = result
+        available = (
+            result.status is UpdateStatus.AVAILABLE
+            and bool(result.download_url)
+            and bool(result.sha256)
+        )
+        self.download_button.setEnabled(available)
         self.download_button.setVisible(available)
         self.later_button.setVisible(result.status is UpdateStatus.AVAILABLE)
         if result.status is UpdateStatus.AVAILABLE:
@@ -44,7 +51,26 @@ class UpdateBanner(QWidget):
             self.message.setText(text.UPDATE_INVALID)
         self.show()
 
-    def _download(self) -> None:
-        if self._download_url:
-            self.download_requested.emit(self._download_url)
+    def show_download_progress(self, percent: int | None = None) -> None:
+        self.download_button.setEnabled(False)
+        self.later_button.setVisible(False)
+        suffix = f" {percent}%" if percent is not None else ""
+        self.message.setText(text.UPDATE_DOWNLOADING + suffix)
+        self.show()
 
+    def show_installing(self) -> None:
+        self.download_button.setVisible(False)
+        self.later_button.setVisible(False)
+        self.message.setText(text.UPDATE_INSTALLING)
+        self.show()
+
+    def show_install_failed(self) -> None:
+        self.download_button.setEnabled(self._result is not None)
+        self.download_button.setVisible(self._result is not None)
+        self.later_button.setVisible(True)
+        self.message.setText(text.UPDATE_FAILED)
+        self.show()
+
+    def _install(self) -> None:
+        if self._result is not None:
+            self.install_requested.emit(self._result)

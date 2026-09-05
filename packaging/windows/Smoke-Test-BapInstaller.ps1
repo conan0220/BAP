@@ -10,6 +10,11 @@ $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\BAP"
 $DataDir = Join-Path $env:LOCALAPPDATA "BAP"
 $AppExe = Join-Path $InstallDir "BAP.exe"
 $Uninstaller = Join-Path $InstallDir "unins000.exe"
+$VersionProbe = Join-Path $env:TEMP ("bap-version-" + [Guid]::NewGuid().ToString("N") + ".txt")
+$InstallerName = [IO.Path]::GetFileName($InstallerPath)
+$VersionMatch = [regex]::Match($InstallerName, '^BAP-Setup-(?<version>\d+\.\d+\.\d+(?:[+-][0-9A-Za-z.-]+)?)\.exe$')
+if (-not $VersionMatch.Success) { throw "BAP installer filename does not contain a valid version." }
+$ExpectedVersion = $VersionMatch.Groups["version"].Value
 
 function Invoke-BapAppCheck {
     param(
@@ -32,6 +37,13 @@ try {
     if ($Install.ExitCode -ne 0) { throw "BAP installer exited with $($Install.ExitCode)." }
     if (-not (Test-Path -LiteralPath $AppExe -PathType Leaf)) { throw "BAP.exe was not installed." }
 
+    Invoke-BapAppCheck -Arguments @("--write-version", $VersionProbe) -Label "BAP Runtime version check" -TimeoutSeconds 60
+    if (-not (Test-Path -LiteralPath $VersionProbe -PathType Leaf)) { throw "BAP Runtime did not report its version." }
+    $RuntimeVersion = (Get-Content -LiteralPath $VersionProbe -Raw).Trim()
+    if ($RuntimeVersion -ne $ExpectedVersion) {
+        throw "BAP Runtime version $RuntimeVersion does not match Installer version $ExpectedVersion."
+    }
+
     Invoke-BapAppCheck -Arguments @("--smoke-test") -Label "BAP launch smoke test" -TimeoutSeconds 60
 
     if ($ApiBaseUrl) {
@@ -48,6 +60,7 @@ try {
     New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $TempDir "installer-smoke.csv") -Value "temporary" -Encoding UTF8
 } finally {
+    Remove-Item -LiteralPath $VersionProbe -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $Uninstaller -PathType Leaf) {
         $Uninstall = Start-Process -FilePath $Uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
         if ($Uninstall.ExitCode -ne 0) { throw "BAP uninstaller exited with $($Uninstall.ExitCode)." }

@@ -27,14 +27,10 @@ if (-not $SourceTreeSha) {
 }
 if ($SourceTreeSha -notmatch "^[0-9a-f]{40}$") { throw "Source Tree SHA is invalid." }
 
-$PyProjectPath = Join-Path $RepoRoot "pyproject.toml"
-$VersionOutput = & $PythonPath -c "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['project']['version'])" $PyProjectPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Desktop version could not be read from pyproject.toml."
-}
-$Version = ([string]$VersionOutput).Trim()
+$VersionPath = Join-Path $RepoRoot "bap_desktop\VERSION"
+$Version = (Get-Content -LiteralPath $VersionPath -Raw).Trim()
 if ($Version -notmatch "^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$") {
-    throw "Desktop version could not be read from pyproject.toml."
+    throw "Desktop version could not be read from bap_desktop\VERSION."
 }
 $AppDist = Join-Path $WorkDirectory "app"
 $PyInstallerWork = Join-Path $WorkDirectory "pyinstaller"
@@ -60,7 +56,7 @@ try {
     if (-not $SkipInstaller) {
         if (-not (Test-Path -LiteralPath $InnoSetupPath -PathType Leaf)) { throw "Inno Setup was not found: $InnoSetupPath" }
         $Iss = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bap-installer.iss") -Raw -Encoding UTF8
-        $Iss = $Iss.Replace('#define MyAppVersion "0.1.0"', ('#define MyAppVersion "' + $Version + '"'))
+        $Iss = $Iss.Replace('#define MyAppVersion "__BAP_VERSION__"', ('#define MyAppVersion "' + $Version + '"'))
         $Iss = $Iss.Replace('OutputDir=..\..\dist', ('OutputDir=' + $OutputDirectory))
         $Iss = $Iss.Replace('Source: "..\..\dist\BAP\*"', ('Source: "' + $AppDirectory + '\*"'))
         Set-Content -LiteralPath $GeneratedIss -Value $Iss -Encoding UTF8
