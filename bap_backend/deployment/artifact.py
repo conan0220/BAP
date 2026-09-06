@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
@@ -74,17 +75,57 @@ def _validate_desktop_metadata(root: Path, manifest: DeliveryManifest) -> None:
     if len(metadata_files) != 1:
         raise ValueError("Candidate must contain exactly one Desktop metadata file")
     metadata = json.loads(metadata_files[0].read_text(encoding="utf-8-sig"))
-    required = {"project", "component", "version", "source_tree_sha", "filename", "sha256"}
+    required = {
+        "schema_version",
+        "project",
+        "component",
+        "version",
+        "platform",
+        "architecture",
+        "source_tree_sha",
+        "installer_filename",
+        "installer_size_bytes",
+        "installer_sha256",
+        "runtime_entries",
+        "candidate_run_id",
+        "created_at",
+    }
     if set(metadata) != required:
         raise ValueError("Desktop metadata schema is invalid")
-    if metadata["project"] != "BAP" or metadata["component"] != "desktop":
+    if (
+        metadata["schema_version"] != 1
+        or metadata["project"] != "BAP"
+        or metadata["component"] != "desktop"
+        or metadata["platform"] != "windows"
+        or metadata["architecture"] != "x86_64"
+    ):
         raise ValueError("Desktop metadata component is invalid")
     if metadata["source_tree_sha"] != manifest.source_tree_sha:
         raise ValueError("Desktop Source Tree SHA does not match Candidate")
-    if metadata["filename"] != manifest.desktop.filename:
+    if metadata["installer_filename"] != manifest.desktop.filename:
         raise ValueError("Desktop filename does not match Candidate")
-    if metadata["sha256"] != manifest.desktop.sha256:
+    if metadata["installer_sha256"] != manifest.desktop.sha256:
         raise ValueError("Desktop checksum does not match Candidate")
+    installer = root / manifest.desktop.filename
+    if metadata["installer_size_bytes"] != installer.stat().st_size:
+        raise ValueError("Desktop size does not match Candidate")
+    expected_filename = f"BAP-Setup-{metadata['version']}.exe"
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[+-][0-9A-Za-z.-]+)?", metadata["version"]):
+        raise ValueError("Desktop version is invalid")
+    if metadata["installer_filename"] != expected_filename:
+        raise ValueError("Desktop version and filename do not match")
+    if metadata["runtime_entries"] != {
+        "desktop": f"releases/{metadata['version']}/BAP.exe",
+        "launcher": "BAPLauncher.exe",
+        "updater": "BAPUpdater.exe",
+    }:
+        raise ValueError("Desktop Runtime entries are invalid")
+    if not isinstance(metadata["candidate_run_id"], str) or not metadata["candidate_run_id"]:
+        raise ValueError("Desktop CI run is invalid")
+    try:
+        datetime.fromisoformat(str(metadata["created_at"]).replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Desktop creation time is invalid") from error
 
 
 def validate_candidate(

@@ -96,6 +96,7 @@ jobs:
       desktop_filename: ${{ steps.validate.outputs.desktop_filename }}
       desktop_version: ${{ steps.metadata.outputs.version }}
       desktop_sha256: ${{ steps.metadata.outputs.sha256 }}
+      desktop_metadata_filename: ${{ steps.metadata.outputs.metadata_filename }}
     steps:
       - uses: actions/checkout@v7
       - name: Set up uv and Python
@@ -135,8 +136,12 @@ jobs:
           [array]$metadataFiles = @(Get-ChildItem "$env:RUNNER_TEMP\candidate\BAP-Setup-*.metadata.json" -File)
           if ($metadataFiles.Count -ne 1) { throw "Expected exactly one Desktop metadata file; found $($metadataFiles.Count)." }
           $metadata = Get-Content -LiteralPath $metadataFiles[0].FullName -Raw | ConvertFrom-Json
+          $versionSource = (Get-Content -LiteralPath ".\bap_desktop\VERSION" -Raw).Trim()
+          if ($metadata.version -ne $versionSource) { throw "Desktop metadata and bap_desktop/VERSION differ." }
+          if ($metadata.installer_filename -ne "${{ steps.validate.outputs.desktop_filename }}") { throw "Desktop metadata filename differs from Candidate." }
           "version=$($metadata.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "sha256=$($metadata.sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha256=$($metadata.installer_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "metadata_filename=$($metadataFiles[0].Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - name: Upload verification diagnostics
         if: ${{ always() && !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -274,11 +279,11 @@ jobs:
         run: |
           $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
           $installer = "$env:RUNNER_TEMP\candidate\${{ needs.verify.outputs.desktop_filename }}"
-          gh release create $tag $installer ($installer + ".sha256") --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "BAP Desktop ${{ needs.verify.outputs.desktop_version }}" --notes "Tested Source Tree SHA: ${{ needs.resolve.outputs.source_tree_sha }}" --draft
-      - name: Register update metadata and publish Release
+          $metadata = "$env:RUNNER_TEMP\candidate\${{ needs.verify.outputs.desktop_metadata_filename }}"
+          gh release create $tag $installer ($installer + ".sha256") $metadata --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "BAP Desktop ${{ needs.verify.outputs.desktop_version }}" --notes "Tested Source Tree SHA: ${{ needs.resolve.outputs.source_tree_sha }}" --draft
+      - name: Stage inactive app_releases record
         shell: powershell
         env:
-          GH_TOKEN: ${{ github.token }}
           SSH_PRIVATE_KEY: ${{ secrets.BAP_BACKEND_SSH_PRIVATE_KEY }}
           HOST: ${{ vars.BAP_BACKEND_HOST }}
           USER: ${{ vars.BAP_BACKEND_USER }}
@@ -289,11 +294,60 @@ jobs:
           icacls $key /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
           $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
           $url = "https://github.com/${{ github.repository }}/releases/download/$tag/${{ needs.verify.outputs.desktop_filename }}"
-          $command = "C:\BAP\current\.venv\Scripts\python.exe -m bap_backend.tools.publish_desktop_release --platform windows --version ${{ needs.verify.outputs.desktop_version }} --download-url $url --sha256 ${{ needs.verify.outputs.desktop_sha256 }} --source-tree-sha ${{ needs.resolve.outputs.source_tree_sha }}"
+          $command = "C:\BAP\current\.venv\Scripts\python.exe -m bap_backend.tools.publish_desktop_release --mode stage --platform windows --version ${{ needs.verify.outputs.desktop_version }} --download-url $url --sha256 ${{ needs.verify.outputs.desktop_sha256 }} --source-tree-sha ${{ needs.resolve.outputs.source_tree_sha }}"
           & "C:\Windows\System32\OpenSSH\ssh.exe" -i $key -p $env:PORT -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL "$env:USER@$env:HOST" $command
-          if ($LASTEXITCODE -ne 0) { throw "Writing app_releases failed; the GitHub Release remains a draft." }
+          if ($LASTEXITCODE -ne 0) { throw "Staging inactive app_releases metadata failed; the GitHub Release remains a draft." }
+      - name: Publish the GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
           gh release edit $tag --repo "${{ github.repository }}" --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw "Publishing the GitHub Release failed." }
+      - name: Verify public Installer checksum and Release Metadata
+        shell: powershell
+        run: |
+          $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
+          $base = "https://github.com/${{ github.repository }}/releases/download/$tag"
+          $verify = "$env:RUNNER_TEMP\public-release"
+          New-Item -ItemType Directory -Path $verify -Force | Out-Null
+          $installerName = "${{ needs.verify.outputs.desktop_filename }}"
+          $metadataName = "${{ needs.verify.outputs.desktop_metadata_filename }}"
+          Invoke-WebRequest -UseBasicParsing -Uri "$base/$installerName" -OutFile (Join-Path $verify $installerName)
+          Invoke-WebRequest -UseBasicParsing -Uri "$base/$metadataName" -OutFile (Join-Path $verify $metadataName)
+          $actual = (Get-FileHash -LiteralPath (Join-Path $verify $installerName) -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "${{ needs.verify.outputs.desktop_sha256 }}") { throw "Public Installer checksum differs from Candidate." }
+          $metadata = Get-Content -LiteralPath (Join-Path $verify $metadataName) -Raw | ConvertFrom-Json
+          if ($metadata.version -ne "${{ needs.verify.outputs.desktop_version }}" -or $metadata.installer_filename -ne $installerName -or $metadata.installer_sha256 -ne $actual -or $metadata.source_tree_sha -ne "${{ needs.resolve.outputs.source_tree_sha }}") {
+            throw "Public Release Metadata differs from the tested Candidate."
+          }
+      - name: Atomically activate Desktop update metadata
+        shell: powershell
+        env:
+          HOST: ${{ vars.BAP_BACKEND_HOST }}
+          USER: ${{ vars.BAP_BACKEND_USER }}
+          PORT: ${{ vars.BAP_BACKEND_SSH_PORT }}
+        run: |
+          $key = "$env:RUNNER_TEMP\bap-production.key"
+          $command = "C:\BAP\current\.venv\Scripts\python.exe -m bap_backend.tools.publish_desktop_release --mode activate --platform windows --version ${{ needs.verify.outputs.desktop_version }}"
+          & "C:\Windows\System32\OpenSSH\ssh.exe" -i $key -p $env:PORT -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL "$env:USER@$env:HOST" $command
+          if ($LASTEXITCODE -ne 0) { throw "Desktop metadata activation failed." }
+      - name: Compensate an incomplete Desktop publication
+        if: failure()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "desktop-v${{ needs.verify.outputs.desktop_version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+          gh release edit $tag --repo "${{ github.repository }}" --draft 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release delete $tag --repo "${{ github.repository }}" --yes --cleanup-tag 2>$null
+          }
+          if ($LASTEXITCODE -ne 0) {
+            "Compensation also failed. Manually remove or draft $url; keep app_releases $tag inactive." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
       - name: Remove SSH key
         if: always()
         shell: powershell

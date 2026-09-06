@@ -19,6 +19,7 @@ from bap_desktop.services.update import (
     UpdateInstaller,
     UpdateResult,
     UpdateService,
+    consume_latest_update_outcome,
 )
 from bap_desktop.ui.auth import AuthPage
 from bap_desktop.ui.app_shell import AppShell
@@ -99,6 +100,7 @@ class MainWindow(QMainWindow):
         self.update_installer = update_installer
         self.quit_for_update = quit_for_update or self._quit_application
         self.shutdown_coordinator = ShutdownCoordinator()
+        self.worker_pool = QThreadPool(self)
         self._install_worker: _InstallWorker | None = None
         self._feature_wrapper: QWidget | None = None
         self._feature_page: QWidget | None = None
@@ -132,6 +134,7 @@ class MainWindow(QMainWindow):
         self.shutdown_coordinator.register(self.session.close)
         if self.update_installer is not None:
             self.shutdown_coordinator.register(self.update_installer.close)
+        self.shutdown_coordinator.register(lambda: self.worker_pool.waitForDone(30_000))
 
         restored = False
         if restore_session:
@@ -140,7 +143,11 @@ class MainWindow(QMainWindow):
             except ApiUnavailableError:
                 restored = False
         self.stack.setCurrentWidget(self.app_shell if restored else self.auth_page)
-        if self.update_service is not None:
+        update_dir = getattr(self.update_installer, "update_dir", None)
+        update_outcome = consume_latest_update_outcome(update_dir) if update_dir is not None else None
+        if update_outcome is not None:
+            self.update_banner.show_update_outcome(update_outcome)
+        elif self.update_service is not None:
             self.update_banner.message.setText(text.UPDATE_CHECKING)
             self.update_banner.show()
             QTimer.singleShot(0, self.start_update_check)
@@ -151,7 +158,7 @@ class MainWindow(QMainWindow):
             return
         worker = _UpdateWorker(self.update_service)
         worker.signals.finished.connect(self._show_update_result)
-        QThreadPool.globalInstance().start(worker)
+        self.worker_pool.start(worker)
 
     @Slot(object)
     def _show_update_result(self, result: UpdateResult) -> None:
@@ -168,18 +175,20 @@ class MainWindow(QMainWindow):
         worker.signals.progress.connect(self.update_banner.show_download_progress)
         worker.signals.failed.connect(self._update_install_failed)
         worker.signals.finished.connect(self._update_install_started)
-        QThreadPool.globalInstance().start(worker)
+        self.worker_pool.start(worker)
 
     @Slot(str)
-    def _update_install_failed(self, _message: str) -> None:
+    def _update_install_failed(self, message: str) -> None:
         self._install_worker = None
-        self.update_banner.show_install_failed()
+        self.update_banner.show_install_failed(message)
 
     @Slot()
     def _update_install_started(self) -> None:
         self._install_worker = None
+        self.update_banner.show_handoff()
+        self.shutdown()
         self.update_banner.show_installing()
-        QTimer.singleShot(150, self.quit_for_update)
+        QTimer.singleShot(0, self.quit_for_update)
 
     @staticmethod
     def _quit_application() -> None:
@@ -248,6 +257,9 @@ class MainWindow(QMainWindow):
         self._feature_page = None
         self._feature_wrapper = None
 
-    def closeEvent(self, event) -> None:
+    def shutdown(self) -> None:
         self.shutdown_coordinator.shutdown()
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
         super().closeEvent(event)

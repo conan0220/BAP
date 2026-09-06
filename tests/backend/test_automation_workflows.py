@@ -57,6 +57,22 @@ def test_pr_workflow_builds_installs_and_tests_one_candidate() -> None:
     assert "Expected exactly one Backend Artifact" in text
     assert "Expected exactly one Desktop Installer" in text
     assert '$WindowsUvPath = $UvPath + ".exe"' in candidate_test
+    assert "Download Previous Public Desktop Installer" in text
+    assert "-PreviousDesktopInstaller" in text
+    assert "-RunRollbackTest" in candidate_test
+    assert "Rollback E2E" in (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(encoding="utf-8")
+
+
+@pytest.mark.scenario("pull-request-ci", "Desktop delivery 版本已存在")
+@pytest.mark.scenario("pull-request-ci", "Backend-only PR 沿用 Desktop 版本")
+def test_pr_checks_desktop_version_only_for_desktop_delivery() -> None:
+    text = PR.read_text(encoding="utf-8")
+    assert "Reject an invalid or already published Desktop version" in text
+    check = text.split("Reject an invalid or already published Desktop version", 1)[1].split("- name:", 1)[0]
+    assert "if: needs.classify.outputs.desktop_changed == 'true'" in check
+    assert 'gh release list --repo "${{ github.repository }}"' in check
+    assert '$releases.tagName -contains "desktop-v$version"' in check
+    assert 'gh release view "desktop-v$version"' not in check
 
 
 def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> None:
@@ -68,9 +84,14 @@ def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> N
     assert 'username="LegacyBoxer"' in script.replace(" ", "")
     assert "Existing account did not survive migration rehearsal" in script
     assert "Existing update metadata did not survive migration rehearsal" in script
+    assert 'throw "Installed Desktop Candidate E2E failed."' not in script
 
     smoke = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(encoding="utf-8")
     assert 'Arguments @("--api-e2e-test")' in smoke
+    assert "function Invoke-BapProcess" in smoke
+    assert "$Process.WaitForExit($TimeoutSeconds * 1000)" in smoke
+    assert "Start-Process -FilePath $LauncherExe -ArgumentList $LauncherArguments -PassThru -Wait" not in smoke
+    assert "$global:LASTEXITCODE = 0" in smoke
 
 
 @pytest.mark.scenario("pull-request-ci", "docs-only PR 不使用 Windows Runner")
@@ -166,6 +187,8 @@ def test_backend_promotion_uses_environment_ssh_and_public_health_gate() -> None
 @pytest.mark.scenario("desktop-automatic-release", "Version 或 tag 已存在")
 @pytest.mark.scenario("desktop-automatic-release", "Release 與 app_releases 都成功")
 @pytest.mark.scenario("desktop-automatic-release", "app_releases 寫入失敗")
+@pytest.mark.scenario("desktop-automatic-release", "GitHub Release 公開失敗")
+@pytest.mark.scenario("desktop-automatic-release", "公開 Asset 驗證失敗")
 @pytest.mark.scenario("desktop-automatic-release", "Repository Workflow contract test")
 def test_desktop_release_uses_tested_asset_draft_and_update_metadata() -> None:
     text = CD.read_text(encoding="utf-8")
@@ -173,10 +196,15 @@ def test_desktop_release_uses_tested_asset_draft_and_update_metadata() -> None:
     assert "/releases/tags/$encodedTag" in text
     assert "[int]$response.StatusCode -ne 404" in text
     assert "gh release create" in text and "--draft" in text
+    assert "desktop_metadata_filename" in text
     assert "publish_desktop_release" in text
+    assert "--mode stage" in text
+    assert "--mode activate" in text
     assert "--source-tree-sha" in text
-    assert "Release remains a draft" in text
     assert "gh release edit" in text and "--draft=false" in text
+    assert "Verify public Installer checksum and Release Metadata" in text
+    assert "Compensate an incomplete Desktop publication" in text
+    assert text.index("--mode stage") < text.index("--draft=false") < text.index("--mode activate")
 
 
 @pytest.mark.scenario("ci-cd-status-reporting", "CI 成功")

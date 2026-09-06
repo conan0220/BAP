@@ -6,7 +6,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from bap_desktop.resources import text
-from bap_desktop.services.update import UpdateResult, UpdateStatus
+from bap_desktop.services.update import UpdateOutcome, UpdateResult, UpdateStatus
 
 
 class UpdateBanner(QWidget):
@@ -58,18 +58,44 @@ class UpdateBanner(QWidget):
         self.message.setText(text.UPDATE_DOWNLOADING + suffix)
         self.show()
 
+    def show_handoff(self) -> None:
+        self.download_button.setVisible(False)
+        self.later_button.setVisible(False)
+        self.message.setText(text.UPDATE_HANDOFF)
+        self.show()
+
     def show_installing(self) -> None:
         self.download_button.setVisible(False)
         self.later_button.setVisible(False)
         self.message.setText(text.UPDATE_INSTALLING)
         self.show()
 
-    def show_install_failed(self) -> None:
+    def show_install_failed(self, detail: str | None = None) -> None:
         self.download_button.setEnabled(self._result is not None)
         self.download_button.setVisible(self._result is not None)
         self.later_button.setVisible(True)
-        self.message.setText(text.UPDATE_FAILED)
+        self.message.setText(detail or text.UPDATE_FAILED)
         self.show()
+
+    def show_recovered(self) -> None:
+        self.download_button.setVisible(False)
+        self.later_button.setVisible(False)
+        self.message.setText(text.UPDATE_RECOVERED)
+        self.show()
+
+    def show_manual_repair(self, detail: str | None = None) -> None:
+        self.download_button.setVisible(False)
+        self.later_button.setVisible(False)
+        self.message.setText(detail or text.UPDATE_MANUAL_REPAIR)
+        self.show()
+
+    def show_update_outcome(self, outcome: UpdateOutcome) -> None:
+        if outcome.status == "rolled_back":
+            self.show_recovered()
+        elif outcome.status == "rollback_failed":
+            self.show_manual_repair(outcome.message)
+        else:
+            self.show_install_failed(outcome.message)
 
     def _install(self) -> None:
         if self._result is not None:

@@ -4,6 +4,7 @@ import ast
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -68,7 +69,75 @@ def test_release_publisher_confirmation_is_safe_for_legacy_windows_consoles() ->
     source = (
         Path(__file__).parents[2] / "bap_backend/tools/publish_desktop_release.py"
     ).read_text(encoding="utf-8")
-    assert 'print(f"Published {args.platform.lower()} {args.version}")' in source
+    assert 'print(f"{args.mode.capitalize()}d {args.platform.lower()} {args.version}")' in source
+
+
+@pytest.mark.scenario("desktop-automatic-release", "Release 與 app_releases 都成功")
+def test_inactive_release_is_hidden_until_atomic_activation(backend_context) -> None:
+    client, factory, _, _ = backend_context
+    with factory() as session:
+        repository = ReleaseRepository(session)
+        repository.upsert(
+            AppRelease(
+                platform="windows",
+                version="0.1.6",
+                download_url="https://github.com/example/BAP/0.1.6.exe",
+                sha256="a" * 64,
+                source_tree_sha="a" * 40,
+                published_at=datetime(2026, 1, 1),
+                is_active=True,
+            )
+        )
+        repository.stage(
+            AppRelease(
+                platform="windows",
+                version="0.1.7",
+                download_url="https://github.com/example/BAP/0.1.7.exe",
+                sha256="b" * 64,
+                source_tree_sha="b" * 40,
+                published_at=datetime(2026, 1, 2),
+                is_active=False,
+            )
+        )
+        session.commit()
+
+    assert client.get("/api/v1/releases/latest", params={"platform": "windows"}).json()["version"] == "0.1.6"
+
+    with factory() as session:
+        ReleaseRepository(session).activate("windows", "0.1.7")
+        session.commit()
+
+    response = client.get("/api/v1/releases/latest", params={"platform": "windows"})
+    assert response.status_code == 200
+    assert response.json()["version"] == "0.1.7"
+
+
+@pytest.mark.scenario("desktop-automatic-release", "app_releases 啟用失敗")
+def test_failed_activation_transaction_keeps_previous_release(backend_context) -> None:
+    client, factory, _, _ = backend_context
+    with factory() as session:
+        repository = ReleaseRepository(session)
+        for version, active in (("0.1.6", True), ("0.1.7", False)):
+            repository.upsert(
+                AppRelease(
+                    platform="windows",
+                    version=version,
+                    download_url=f"https://github.com/example/BAP/{version}.exe",
+                    sha256=("a" if active else "b") * 64,
+                    source_tree_sha=("a" if active else "b") * 40,
+                    published_at=datetime(2026, 1, 1),
+                    is_active=active,
+                )
+            )
+        session.commit()
+
+    with factory() as session:
+        ReleaseRepository(session).activate("windows", "0.1.7")
+        session.rollback()
+
+    response = client.get("/api/v1/releases/latest", params={"platform": "windows"})
+    assert response.status_code == 200
+    assert response.json()["version"] == "0.1.6"
 
 
 def test_health_reports_database_and_commit(backend_context) -> None:

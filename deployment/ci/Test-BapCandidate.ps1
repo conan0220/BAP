@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$DesktopInstaller,
     [Parameter(Mandatory = $true)][string]$SourceTreeSha,
     [string]$UvPath = "C:\Users\runneradmin\.local\bin\uv.exe",
-    [string]$WorkDirectory
+    [string]$WorkDirectory,
+    [string]$PreviousDesktopInstaller
 )
 
 $ErrorActionPreference = "Stop"
@@ -135,8 +136,16 @@ uvicorn.run(app, host="127.0.0.1", port=12345)
     $ExistingRelease = Invoke-RestMethod -Uri "http://127.0.0.1:12345/api/v1/releases/latest?platform=windows" -TimeoutSec 10
     if ($ExistingRelease.source_tree_sha -ne $SourceTreeSha) { throw "Existing update metadata did not survive migration rehearsal." }
 
-    & (Join-Path $RepoRoot "packaging\windows\Smoke-Test-BapInstaller.ps1") -InstallerPath $DesktopInstaller -ApiBaseUrl "http://127.0.0.1:12345/api/"
-    if ($LASTEXITCODE -ne 0) { throw "Installed Desktop Candidate E2E failed." }
+    $DesktopProgram = Join-Path $WorkDirectory "desktop-program"
+    $DesktopData = Join-Path $WorkDirectory "desktop-data"
+    & (Join-Path $RepoRoot "packaging\windows\Smoke-Test-BapInstaller.ps1") `
+        -InstallerPath $DesktopInstaller `
+        -ApiBaseUrl "http://127.0.0.1:12345/api/" `
+        -InstallDirectory $DesktopProgram `
+        -DataDirectory $DesktopData `
+        -PreviousInstallerPath $PreviousDesktopInstaller `
+        -RunRollbackTest:([bool]$PreviousDesktopInstaller) `
+        -RunHandoffTest
     Write-Output "BAP Candidate production-like E2E passed."
 } finally {
     if ($BackendProcess -and -not $BackendProcess.HasExited) {

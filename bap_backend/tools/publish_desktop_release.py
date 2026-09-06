@@ -1,4 +1,4 @@
-"""Create or update one Desktop App release after GitHub publishes it."""
+"""Stage or atomically activate Desktop update metadata."""
 
 from __future__ import annotations
 
@@ -21,11 +21,12 @@ _TREE_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="發布 BAP Desktop App 更新資訊")
+    parser.add_argument("--mode", choices=("stage", "activate"), required=True)
     parser.add_argument("--platform", required=True)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--download-url", required=True)
-    parser.add_argument("--sha256", required=True)
-    parser.add_argument("--source-tree-sha", required=True)
+    parser.add_argument("--download-url")
+    parser.add_argument("--sha256")
+    parser.add_argument("--source-tree-sha")
     parser.add_argument("--published-at", default=None, help="ISO 8601；預設使用目前 UTC")
     return parser
 
@@ -46,29 +47,35 @@ def validate_release_input(version: str, download_url: str, sha256: str, source_
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    try:
-        validate_release_input(args.version, args.download_url, args.sha256, args.source_tree_sha)
-        published_at = datetime.fromisoformat(args.published_at) if args.published_at else datetime.utcnow()
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
     settings = BackendSettings()
     factory = create_session_factory(create_database_engine(settings.database_url))
     with factory() as session:
-        ReleaseRepository(session).upsert(
-            AppRelease(
-                platform=args.platform.lower(),
-                version=args.version,
-                download_url=args.download_url,
-                sha256=args.sha256.lower(),
-                source_tree_sha=args.source_tree_sha.lower(),
-                published_at=published_at,
-                is_active=True,
+        repository = ReleaseRepository(session)
+        if args.mode == "stage":
+            if not args.download_url or not args.sha256 or not args.source_tree_sha:
+                raise SystemExit("stage mode requires download URL, sha256, and source tree sha")
+            try:
+                validate_release_input(args.version, args.download_url, args.sha256, args.source_tree_sha)
+                published_at = datetime.fromisoformat(args.published_at) if args.published_at else datetime.utcnow()
+            except ValueError as error:
+                raise SystemExit(str(error)) from error
+            repository.stage(
+                AppRelease(
+                    platform=args.platform.lower(),
+                    version=args.version,
+                    download_url=args.download_url,
+                    sha256=args.sha256.lower(),
+                    source_tree_sha=args.source_tree_sha.lower(),
+                    published_at=published_at,
+                    is_active=False,
+                )
             )
-        )
+        else:
+            repository.activate(args.platform.lower(), args.version)
         session.commit()
     # GitHub's Windows runner may expose a legacy console code page. Keep
     # operational output ASCII so encoding cannot turn success into failure.
-    print(f"Published {args.platform.lower()} {args.version}")
+    print(f"{args.mode.capitalize()}d {args.platform.lower()} {args.version}")
     return 0
 
 
