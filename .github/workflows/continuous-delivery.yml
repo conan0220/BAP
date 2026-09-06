@@ -183,7 +183,7 @@ jobs:
             desktop_sha256 = $manifest.desktop.sha256
             backend_changed = $manifest.backend_changed
             desktop_changed = $manifest.desktop_changed
-            database_revision = "0002_app_release_source_tree_sha"
+            database_revision = "0003_analysis_sessions"
             promoted_at = [DateTime]::UtcNow.ToString("o")
             backend_result = "pending"
             desktop_result = if ($manifest.desktop_changed) { "pending" } else { "not_selected" }

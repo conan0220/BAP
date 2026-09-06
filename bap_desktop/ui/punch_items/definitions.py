@@ -15,6 +15,7 @@ class ImuPlacement:
 @dataclass(frozen=True, slots=True)
 class PunchItemDefinition:
     name: str
+    analysis_type: str
     description: str
     placements: tuple[ImuPlacement, ...]
     configuration_decided: bool = True
@@ -26,17 +27,19 @@ WRIST_PLACEMENTS = (
 )
 
 PUNCH_ITEM_DEFINITIONS = {
-    "出拳次數": PunchItemDefinition("出拳次數", "記錄左右手的出拳動作。", WRIST_PLACEMENTS),
-    "出拳速度": PunchItemDefinition("出拳速度", "比較左右手的出拳速度。", WRIST_PLACEMENTS),
+    "出拳次數": PunchItemDefinition("出拳次數", "punch_count", "記錄左右手的出拳動作。", WRIST_PLACEMENTS),
+    "出拳速度": PunchItemDefinition("出拳速度", "punch_speed", "比較左右手的出拳速度。", WRIST_PLACEMENTS),
     "出拳力量": PunchItemDefinition(
         "出拳力量",
+        "punch_force",
         "所需 IMU 數量與安裝位置尚未決定。",
         (),
         configuration_decided=False,
     ),
-    "出拳軌跡": PunchItemDefinition("出拳軌跡", "記錄左右手的動作路徑。", WRIST_PLACEMENTS),
+    "出拳軌跡": PunchItemDefinition("出拳軌跡", "punch_trajectory", "記錄左右手的動作路徑。", WRIST_PLACEMENTS),
     "拳種辨識": PunchItemDefinition(
         "拳種辨識",
+        "punch_classification",
         "由持把人左右手把背面的 IMU 記錄擊打動作。",
         (
             ImuPlacement("holder_left_pad", "左手把背面", "持把人"),

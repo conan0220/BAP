@@ -11,12 +11,16 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from bap_backend.app.api.v1.auth import router as auth_router
+from bap_backend.app.api.v1.analysis_sessions import router as analysis_sessions_router
 from bap_backend.app.api.v1.releases import router as releases_router
 from bap_backend.app.core.config import BackendSettings
 from bap_backend.app.core.security import default_refresh_token_generator
 from bap_backend.app.db.session import create_database_engine, create_session_factory
 from bap_backend.app.services.auth import utcnow
 from bap_backend.app.services.errors import ServiceError
+from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
+from bap_backend.app.services.analysis_registry import AnalysisRegistry
+from bap_common.analysis_contracts import builtin_analysis_specifications
 
 
 def _error(code: str, message: str, status_code: int) -> JSONResponse:
@@ -29,6 +33,7 @@ def create_app(
     session_factory=None,
     clock: Callable = utcnow,
     refresh_token_generator: Callable[[], str] = default_refresh_token_generator,
+    analysis_registry: AnalysisRegistry | None = None,
 ) -> FastAPI:
     settings = settings or BackendSettings()
     if session_factory is None:
@@ -39,11 +44,22 @@ def create_app(
     application.state.session_factory = session_factory
     application.state.clock = clock
     application.state.refresh_token_generator = refresh_token_generator
+    application.state.analysis_registry = analysis_registry or AnalysisRegistry(
+        builtin_analysis_specifications()
+    )
+    application.state.analysis_dispatcher = AnalysisDispatcher(
+        session_factory, application.state.analysis_registry
+    )
 
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(auth_router)
+    api_v1.include_router(analysis_sessions_router)
     api_v1.include_router(releases_router)
     application.include_router(api_v1)
+
+    @application.on_event("startup")
+    def recover_analysis_jobs() -> None:
+        application.state.analysis_dispatcher.recover()
 
     @application.get("/health")
     def health(request: Request):

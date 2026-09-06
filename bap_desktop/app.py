@@ -12,7 +12,27 @@ from bap_desktop import APP_NAME, PRODUCT_NAME, __version__
 def _run_api_e2e() -> int:
     """Exercise the packaged clients against a real CI Backend over HTTP."""
 
-    from bap_desktop.api_client import ApiRejectedError, AuthApiClient, ReleaseApiClient
+    import io
+    import tempfile
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from anrot_imu_driver.parsers.anrot_serial_parser import AnrotFrame
+    from bap_common.analysis_session import (
+        AnalysisInputBinding,
+        AnalysisJobRequest,
+        CsvDescriptor,
+        ImuSourceDescriptor,
+        SessionMetadata,
+        SourceConnectionType,
+    )
+    from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv_bytes, write_header
+    from bap_desktop.api_client import (
+        AnalysisApiClient,
+        ApiRejectedError,
+        AuthApiClient,
+        ReleaseApiClient,
+    )
     from bap_desktop.settings import DesktopSettings
 
     settings = DesktopSettings()
@@ -38,6 +58,62 @@ def _run_api_e2e() -> int:
     else:
         raise RuntimeError("duplicate Username was unexpectedly accepted")
     tokens = auth.login(username, password)
+    analysis = AnalysisApiClient(base_url)
+    capabilities = analysis.capabilities(tokens.access_token)
+    punch_count = next(
+        item for item in capabilities if item.specification.analysis_type == "punch_count"
+    )
+    if not punch_count.executable:
+        raise RuntimeError("CI Reference Executor is not available")
+
+    def fake_csv(seed: float) -> bytes:
+        output = io.StringIO(newline="")
+        writer = write_header(output)
+        frame = AnrotFrame()
+        frame.frame_type = 0x91
+        frame.system_time_ms = 1
+        frame.acc = (seed, seed + 1, seed + 2)
+        frame.gyr = (3.0, 4.0, 5.0)
+        frame.mag = (6.0, 7.0, 8.0)
+        frame.quat = (1.0, 0.0, 0.0, 0.0)
+        frame.roll = frame.pitch = frame.yaw = 0.0
+        writer.writerow(frame_csv_row(frame, sample_index=0, packet_index=0, elapsed_us=0))
+        return output.getvalue().encode("utf-8")
+
+    with tempfile.TemporaryDirectory(prefix="bap-installed-e2e-") as temp:
+        root = Path(temp)
+        descriptors = []
+        for name, seed in (("left.csv", 1.0), ("right.csv", 2.0)):
+            data = fake_csv(seed)
+            (root / name).write_bytes(data)
+            inspected = inspect_common_imu_csv_bytes(data)
+            descriptors.append(CsvDescriptor(
+                csv_id=uuid4(), filename=name,
+                source=ImuSourceDescriptor(
+                    source_id=f"ci:{name}", port=f"FAKE-{name}",
+                    connection_type=SourceConnectionType.WIRED, baud_rate=921600,
+                ),
+                row_count=inspected.row_count, size_bytes=inspected.size_bytes,
+                sha256=inspected.sha256,
+            ))
+        job = AnalysisJobRequest(
+            analysis_id=uuid4(), analysis_type="punch_count", spec_version=1,
+            input_bindings=(
+                AnalysisInputBinding(input_role="left_wrist", csv_id=descriptors[0].csv_id),
+                AnalysisInputBinding(input_role="right_wrist", csv_id=descriptors[1].csv_id),
+            ),
+        )
+        now = datetime.now(timezone.utc)
+        metadata = SessionMetadata(
+            session_id=uuid4(), desktop_version=__version__, started_at=now, ended_at=now,
+            csv_files=tuple(descriptors), analyses=(job,),
+        )
+        accepted = analysis.upload(root, metadata, tokens.access_token)
+        result = analysis.analysis_status(
+            accepted["session_id"], accepted["analysis_ids"][0], tokens.access_token
+        )
+        if result.get("status") != "completed" or result.get("result", {}).get("total_punch_count") != 2:
+            raise RuntimeError("installed Desktop Session-to-Result E2E did not complete")
     refreshed = auth.refresh(tokens.refresh_token)
     auth.logout(refreshed.refresh_token)
     release = ReleaseApiClient(base_url).latest("windows")
@@ -60,7 +136,13 @@ def main() -> int:
 
     from PySide6.QtWidgets import QApplication
 
-    from bap_desktop.api_client import AuthApiClient, ReleaseApiClient
+    from bap_desktop.api_client import (
+        AnalysisApiClient,
+        AuthApiClient,
+        AuthenticatedAnalysisClient,
+        ReleaseApiClient,
+    )
+    from bap_desktop.services.analysis_flow import AnalysisFlowService
     from bap_desktop.services.imu_diagnostics import ImuDiagnosticsService
     from bap_desktop.services.session import SessionService
     from bap_desktop.services.update import UpdateInstaller, UpdateService
@@ -78,6 +160,9 @@ def main() -> int:
     settings.prepare_local_directories()
     base_url = str(settings.api_base_url)
     session = SessionService(AuthApiClient(base_url))
+    analysis_flow = AnalysisFlowService(
+        AuthenticatedAnalysisClient(AnalysisApiClient(base_url), session)
+    )
     update_service = UpdateService(
         ReleaseApiClient(base_url),
         current_version=__version__,
@@ -90,6 +175,9 @@ def main() -> int:
         update_service=None if smoke_test else update_service,
         update_installer=None if smoke_test else update_installer,
         restore_session=not smoke_test,
+        analysis_flow=analysis_flow,
+        measurement_sessions_dir=settings.measurement_sessions_dir,
+        desktop_version=__version__,
     )
     window.show()
     if smoke_test:

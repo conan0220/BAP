@@ -12,6 +12,7 @@ from bap_desktop.resources import text
 from bap_desktop.services.imu_diagnostics import ImuDiagnosticsService
 from bap_desktop.services.imu_discovery import ImuDiscoveryService
 from bap_desktop.services.session import SessionService
+from bap_desktop.services.analysis_flow import AnalysisFlowService
 from bap_desktop.services.shutdown import ShutdownCoordinator
 from bap_desktop.services.update import (
     UpdateInstallError,
@@ -78,6 +79,9 @@ class MainWindow(QMainWindow):
         *,
         diagnostic_service_factory: Callable[[], ImuDiagnosticsService] = ImuDiagnosticsService,
         discovery_service_factory: Callable[[], ImuDiscoveryService] = ImuDiscoveryService,
+        analysis_flow: AnalysisFlowService | None = None,
+        measurement_sessions_dir=None,
+        desktop_version: str = "0.0.0",
         update_service: UpdateService | None = None,
         update_installer: UpdateInstaller | None = None,
         quit_for_update: Callable[[], None] | None = None,
@@ -88,6 +92,9 @@ class MainWindow(QMainWindow):
         self.session = session
         self.diagnostic_service_factory = diagnostic_service_factory
         self.discovery_service_factory = discovery_service_factory
+        self.analysis_flow = analysis_flow
+        self.measurement_sessions_dir = measurement_sessions_dir
+        self.desktop_version = desktop_version
         self.update_service = update_service
         self.update_installer = update_installer
         self.quit_for_update = quit_for_update or self._quit_application
@@ -201,7 +208,13 @@ class MainWindow(QMainWindow):
         if item_name not in text.PUNCH_ITEMS:
             return
         self._show_feature(
-            PunchItemPage(item_name, service=self.discovery_service_factory()),
+            PunchItemPage(
+                item_name,
+                service=self.discovery_service_factory(),
+                analysis_flow=self.analysis_flow,
+                recording_root=self.measurement_sessions_dir,
+                desktop_version=self.desktop_version,
+            ),
             key=f"punch:{item_name}",
             title=item_name,
         )

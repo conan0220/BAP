@@ -47,6 +47,8 @@ git switch -c feature/<功能名稱>
 .\.venv\Scripts\python.exe -m pytest
 ~~~
 
+Analysis Session、Common IMU CSV 或 Backend 分析流程的開發方式，請見 [Analysis Session 開發與除錯指南](docs/guides/analysis-session-development.md)；資料格式與名詞請見 [拳擊分析 Session 與資料契約](docs/knowledge/analysis-session.md)。
+
 ### 3. Commit 並 push feature branch
 
 ~~~powershell

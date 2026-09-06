@@ -25,3 +25,10 @@ def test_redesign_desktop_app_ui_scenarios_have_pytest_markers() -> None:
     assert not missing, "Missing pytest.mark.scenario links:\n" + "\n".join(
         f"- {capability}: {scenario}" for capability, scenario in missing
     )
+
+
+def test_analysis_session_flow_scenarios_have_pytest_markers() -> None:
+    missing = sorted(missing_scenarios(ROOT, "add-boxing-analysis-session-flow"))
+    assert not missing, "Missing pytest.mark.scenario links:\n" + "\n".join(
+        f"- {capability}: {scenario}" for capability, scenario in missing
+    )
