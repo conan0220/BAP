@@ -228,3 +228,8 @@ if ($PreviousVersion) {
 } else {
     Write-Output "BAP fresh versioned installer smoke test passed; no Previous Public Version was supplied."
 }
+
+# Failure Injection intentionally makes the packaged Updater return a non-zero
+# native exit code. Reaching this line means every rollback assertion passed,
+# so do not let that expected native result become the GitHub Actions step result.
+$global:LASTEXITCODE = 0

@@ -91,6 +91,7 @@ def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> N
     assert "function Invoke-BapProcess" in smoke
     assert "$Process.WaitForExit($TimeoutSeconds * 1000)" in smoke
     assert "Start-Process -FilePath $LauncherExe -ArgumentList $LauncherArguments -PassThru -Wait" not in smoke
+    assert "$global:LASTEXITCODE = 0" in smoke
 
 
 @pytest.mark.scenario("pull-request-ci", "docs-only PR 不使用 Windows Runner")
