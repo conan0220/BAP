@@ -70,7 +70,9 @@ def test_pr_checks_desktop_version_only_for_desktop_delivery() -> None:
     assert "Reject an invalid or already published Desktop version" in text
     check = text.split("Reject an invalid or already published Desktop version", 1)[1].split("- name:", 1)[0]
     assert "if: needs.classify.outputs.desktop_changed == 'true'" in check
-    assert 'gh release view "desktop-v$version"' in check
+    assert 'gh release list --repo "${{ github.repository }}"' in check
+    assert '$releases.tagName -contains "desktop-v$version"' in check
+    assert 'gh release view "desktop-v$version"' not in check
 
 
 def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> None:

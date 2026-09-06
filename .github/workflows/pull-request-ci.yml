@@ -75,8 +75,9 @@ jobs:
         run: |
           $version = (Get-Content -LiteralPath ".\bap_desktop\VERSION" -Raw).Trim()
           if ($version -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw "Desktop VERSION is invalid." }
-          gh release view "desktop-v$version" --repo "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -eq 0) { throw "Desktop version is already published: desktop-v$version" }
+          $releases = gh release list --repo "${{ github.repository }}" --limit 1000 --json tagName | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Unable to query published Desktop versions." }
+          if ($releases.tagName -contains "desktop-v$version") { throw "Desktop version is already published: desktop-v$version" }
       - name: Run source-level automated tests
         shell: powershell
         run: .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp "$env:RUNNER_TEMP\pytest"
