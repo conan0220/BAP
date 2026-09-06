@@ -59,6 +59,20 @@ def test_pr_workflow_builds_installs_and_tests_one_candidate() -> None:
     assert '$WindowsUvPath = $UvPath + ".exe"' in candidate_test
 
 
+def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> None:
+    script = (ROOT / "deployment/ci/Test-BapCandidate.ps1").read_text(encoding="utf-8")
+    assert "ci_reference_backend.py" in script
+    assert 'registry.register_executor("punch_count", 1' in script
+    assert "upgrade 0002_app_release_source_tree_sha" in script
+    assert "downgrade 0002_app_release_source_tree_sha" in script
+    assert 'username="LegacyBoxer"' in script.replace(" ", "")
+    assert "Existing account did not survive migration rehearsal" in script
+    assert "Existing update metadata did not survive migration rehearsal" in script
+
+    smoke = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(encoding="utf-8")
+    assert 'Arguments @("--api-e2e-test")' in smoke
+
+
 @pytest.mark.scenario("pull-request-ci", "docs-only PR 不使用 Windows Runner")
 @pytest.mark.scenario("pull-request-ci", "同一 PR 推送新 commit")
 @pytest.mark.scenario("component-delivery-routing", "只有文件變更")

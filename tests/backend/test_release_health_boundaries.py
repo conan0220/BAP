@@ -116,10 +116,10 @@ def test_repository_layer_has_no_fastapi_dependency() -> None:
         assert not any(name.startswith("fastapi") for name in imports)
 
 
-def test_api_routes_do_not_execute_sql_or_define_imu_uploads() -> None:
+def test_api_routes_keep_sql_and_device_parsing_out_of_http_layer() -> None:
     root = Path(__file__).resolve().parents[2] / "bap_backend/app/api"
     text = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
     assert "session.execute" not in text
     assert "imu_payload" not in text
-    assert "csv" not in text.lower()
+    assert "anrot_imu_driver" not in text
     assert "punch" not in text.lower()

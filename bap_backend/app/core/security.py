@@ -58,3 +58,7 @@ def default_refresh_token_generator() -> str:
 
 
 RefreshTokenGenerator = Callable[[], str]
+
+
+def decode_access_token(token: str, *, signing_key: str) -> dict:
+    return jwt.decode(token, signing_key, algorithms=["HS256"])

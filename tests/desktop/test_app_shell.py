@@ -32,7 +32,7 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
         def login(self, username: str, password: str):
             if password.endswith("wrong"):
                 raise api_client.ApiRejectedError("invalid", 401)
-            return SimpleNamespace(refresh_token="first-refresh")
+            return SimpleNamespace(access_token="access", refresh_token="first-refresh")
 
         def refresh(self, refresh_token: str):
             assert refresh_token == "first-refresh"
@@ -49,8 +49,33 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
             assert platform == "windows"
             return SimpleNamespace(source_tree_sha="a" * 40)
 
+    class FakeAnalysisClient:
+        def __init__(self, base_url: str) -> None:
+            assert base_url == "http://127.0.0.1:12345/api/"
+
+        def capabilities(self, access_token: str):
+            from bap_common.analysis_contracts import builtin_analysis_specifications
+            from bap_desktop.api_client.analysis import AnalysisCapability
+            assert access_token == "access"
+            return (AnalysisCapability(builtin_analysis_specifications()[0], True),)
+
+        def upload(self, directory, metadata, access_token: str):
+            assert access_token == "access"
+            assert len(metadata.csv_files) == 2
+            return {
+                "session_id": str(metadata.session_id),
+                "analysis_ids": [str(metadata.analyses[0].analysis_id)],
+            }
+
+        def analysis_status(self, session_id: str, analysis_id: str, access_token: str):
+            return {
+                "status": "completed",
+                "result": {"left_punch_count": 1, "right_punch_count": 1, "total_punch_count": 2},
+            }
+
     monkeypatch.setattr(api_client, "AuthApiClient", FakeAuthClient)
     monkeypatch.setattr(api_client, "ReleaseApiClient", FakeReleaseClient)
+    monkeypatch.setattr(api_client, "AnalysisApiClient", FakeAnalysisClient)
     monkeypatch.setattr(
         desktop_settings,
         "DesktopSettings",

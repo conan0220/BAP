@@ -13,6 +13,8 @@ from bap_desktop.services.imu_diagnostics import (
 )
 from bap_desktop.services.imu_discovery import DiscoveryResult, ImuSource
 from bap_desktop.services.imu_scan import ConnectionType
+from bap_desktop.api_client.analysis import AnalysisCapability
+from bap_common.analysis_contracts import builtin_analysis_specifications
 from bap_desktop.ui.auth import AuthPage
 from bap_desktop.ui.components import PageHeader
 from bap_desktop.ui.home import HomePage
@@ -190,6 +192,7 @@ def test_single_connected_port_still_has_only_its_own_sample_rate(qtbot) -> None
 @pytest.mark.scenario("imu-source-discovery", "設定出拳速度的 IMU")
 @pytest.mark.scenario("imu-source-discovery", "設定出拳軌跡的 IMU")
 @pytest.mark.scenario("imu-source-discovery", "設定拳種辨識的 IMU")
+@pytest.mark.scenario("desktop-ui-design", "user 進入出拳次數")
 def test_each_decided_item_builds_its_required_two_placement_fields(qtbot) -> None:
     expected = {
         "出拳次數": ("左手腕", "右手腕"),
@@ -205,6 +208,7 @@ def test_each_decided_item_builds_its_required_two_placement_fields(qtbot) -> No
 
 @pytest.mark.scenario("desktop-ui-design", "IMU 尚未完成分配")
 @pytest.mark.scenario("imu-source-discovery", "尚有位置未分配")
+@pytest.mark.scenario("imu-source-discovery", "尚有必要 Input Role 未分配")
 def test_incomplete_assignment_keeps_continue_disabled(qtbot) -> None:
     page = make_punch_page(qtbot, "出拳次數")
     first = list(page._source_selectors)[0]
@@ -405,3 +409,130 @@ def test_diagnostic_progress_has_room_for_complete_percentage(qtbot) -> None:
     assert page.progress.isTextVisible()
     assert page.progress.format() == "%p%"
     assert page.progress.height() >= page.progress.fontMetrics().height() + 6
+
+
+@pytest.mark.scenario("imu-source-discovery", "已註冊分析完成有效分配")
+@pytest.mark.scenario("desktop-ui-design", "IMU 分配完成且分析可執行")
+@pytest.mark.scenario("boxing-analysis-session", "Analysis Executor 可用")
+def test_executable_capability_enables_start_measurement(qtbot, tmp_path: Path) -> None:
+    class Flow:
+        pass
+
+    result = DiscoveryResult(SOURCES, ())
+    page = PunchItemPage(
+        "出拳次數", DiscoveryStub(result), analysis_flow=Flow(), recording_root=tmp_path
+    )
+    qtbot.addWidget(page)
+    page._show_sources(result)
+    first, second = page._source_selectors
+    first.setCurrentIndex(1)
+    second.setCurrentIndex(2)
+    capability = AnalysisCapability(builtin_analysis_specifications()[0], True)
+    page._capability_ready(capability)
+
+    assert page._measurement_state == "ready"
+    assert page.continue_button.text() == "開始測量"
+    assert page.continue_button.isEnabled()
+
+
+@pytest.mark.scenario("imu-source-discovery", "分析 Executor 尚未提供")
+@pytest.mark.scenario("boxing-analysis-session", "Analysis Executor 尚未提供")
+def test_unavailable_capability_does_not_record(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳次數")
+    page._capability_ready(AnalysisCapability(builtin_analysis_specifications()[0], False))
+    assert "待開發" in page.status.text()
+    assert not page.continue_button.isEnabled()
+
+
+@pytest.mark.scenario("imu-source-discovery", "探索資料與正式資料分離")
+def test_discovery_is_cleared_before_formal_recording(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳次數")
+    first, second = page._source_selectors
+    first.setCurrentIndex(1)
+    second.setCurrentIndex(2)
+    page._capability_ready(AnalysisCapability(builtin_analysis_specifications()[0], True))
+    assert page.service.clear_count == 1
+    assert page._recording is None
+
+
+@pytest.mark.scenario("desktop-ui-design", "正在錄製")
+@pytest.mark.scenario("boxing-analysis-session", "user 開始新的測量")
+@pytest.mark.scenario("boxing-analysis-session", "從出拳次數頁面建立 Session")
+def test_start_measurement_shows_elapsed_time_and_stop_action(qtbot, tmp_path: Path) -> None:
+    class Recording:
+        def __init__(self, *_args, **_kwargs):
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def abort(self):
+            pass
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page.recording_root = tmp_path
+    page.recording_factory = Recording
+    first, second = page._source_selectors
+    first.setCurrentIndex(1)
+    second.setCurrentIndex(2)
+    page._measurement_state = "ready"
+    page._start_measurement()
+    page._update_elapsed()
+
+    assert page._recording.started
+    assert page._measurement_state == "recording"
+    assert page.continue_button.text() == "結束測量"
+    assert "00:01" in page.status.text()
+    page.shutdown()
+
+
+@pytest.mark.scenario("desktop-ui-design", "收到有效 Result")
+@pytest.mark.scenario("boxing-analysis-session", "Backend 完成分析")
+def test_completed_result_is_rendered_with_session_identity(qtbot) -> None:
+    from types import SimpleNamespace
+
+    class Flow:
+        def validate_completed(self, _payload):
+            return SimpleNamespace(
+                session_id="session-123", analysis_id="analysis-1",
+                result={"total_punch_count": 5},
+            )
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page.analysis_flow = Flow()
+    page._analysis_status_ready({"status": "completed"})
+    visible = " ".join(label.text() for label in page.findChildren(QLabel))
+    assert "session-123" in visible
+    assert "total_punch_count：5" in visible
+
+
+@pytest.mark.scenario("desktop-ui-design", "正在上傳或分析")
+def test_pending_backend_status_is_not_rendered_as_result(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳次數")
+    page._analysis_status_ready({"status": "pending"})
+    assert page._measurement_state == "analyzing"
+    assert "分析中" in page.status.text()
+    assert "Result" not in page.status.text()
+
+
+@pytest.mark.scenario("desktop-ui-design", "收到不符合規格的 Result")
+def test_invalid_result_is_not_shown_as_success(qtbot) -> None:
+    class Flow:
+        def validate_completed(self, _payload):
+            raise ValueError("bad result")
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page.analysis_flow = Flow()
+    page._analysis_status_ready({"status": "completed"})
+    assert "格式不正確" in page.status.text()
+    assert page._measurement_state == "failed"
+
+
+@pytest.mark.scenario("desktop-ui-design", "上傳時網路中斷")
+@pytest.mark.scenario("boxing-analysis-session", "上傳中斷")
+def test_upload_failure_offers_retry_without_new_recording(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳次數")
+    page._upload_failed("網路中斷")
+    assert page._measurement_state == "upload_failed"
+    assert page.continue_button.text() == "重試上傳"
+    assert "不需要重新測量" in page.message.text()

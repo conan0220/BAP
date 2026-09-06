@@ -71,7 +71,7 @@ try {
         "--source-tree-sha", $SourceTreeSha,
         "--version", $Version,
         "--entry-point", "bap_backend.app.main:app",
-        "--alembic-revision", "0002_app_release_source_tree_sha"
+        "--alembic-revision", "0003_analysis_sessions"
     )
     foreach ($Path in @("bap_backend", "bap_common", "migrations", "deployment", "alembic.ini", "pyproject.toml", "uv.lock", ".python-version")) {
         $ManifestArgs += @("--file", $Path)
