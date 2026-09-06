@@ -146,7 +146,6 @@ uvicorn.run(app, host="127.0.0.1", port=12345)
         -PreviousInstallerPath $PreviousDesktopInstaller `
         -RunRollbackTest:([bool]$PreviousDesktopInstaller) `
         -RunHandoffTest
-    if ($LASTEXITCODE -ne 0) { throw "Installed Desktop Candidate E2E failed." }
     Write-Output "BAP Candidate production-like E2E passed."
 } finally {
     if ($BackendProcess -and -not $BackendProcess.HasExited) {

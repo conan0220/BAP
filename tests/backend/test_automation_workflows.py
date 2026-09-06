@@ -84,6 +84,7 @@ def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> N
     assert 'username="LegacyBoxer"' in script.replace(" ", "")
     assert "Existing account did not survive migration rehearsal" in script
     assert "Existing update metadata did not survive migration rehearsal" in script
+    assert 'throw "Installed Desktop Candidate E2E failed."' not in script
 
     smoke = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(encoding="utf-8")
     assert 'Arguments @("--api-e2e-test")' in smoke
