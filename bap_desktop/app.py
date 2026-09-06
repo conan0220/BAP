@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from bap_desktop import APP_NAME, PRODUCT_NAME, __version__
@@ -45,8 +48,72 @@ def _installed_program_root() -> Path | None:
     return executable_dir
 
 
-def _run_api_e2e() -> int:
+def _write_api_e2e_result(path: Path, payload: dict[str, object]) -> None:
+    """Write machine-readable E2E progress without leaving a partial JSON file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _run_api_e2e_command(result_path: Path | None) -> int:
+    """Run packaged E2E without allowing a GUI exception dialog to block CI."""
+
+    stage = "starting"
+
+    def report(next_stage: str) -> None:
+        nonlocal stage
+        stage = next_stage
+        if result_path is not None:
+            _write_api_e2e_result(
+                result_path,
+                {
+                    "schema_version": 1,
+                    "status": "running",
+                    "stage": stage,
+                    "desktop_version": __version__,
+                },
+            )
+
+    report(stage)
+    try:
+        exit_code = _run_api_e2e(report)
+    except Exception as error:
+        if result_path is not None:
+            _write_api_e2e_result(
+                result_path,
+                {
+                    "schema_version": 1,
+                    "status": "failed",
+                    "stage": stage,
+                    "desktop_version": __version__,
+                    "error_type": type(error).__name__,
+                    "message": str(error) or "Packaged API E2E failed",
+                },
+            )
+        return 1
+    if result_path is not None:
+        _write_api_e2e_result(
+            result_path,
+            {
+                "schema_version": 1,
+                "status": "succeeded" if exit_code == 0 else "failed",
+                "stage": "completed",
+                "desktop_version": __version__,
+                "exit_code": exit_code,
+            },
+        )
+    return exit_code
+
+
+def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
     """Exercise the packaged clients against a real CI Backend over HTTP."""
+
+    report = report_progress or (lambda _stage: None)
 
     import io
     import tempfile
@@ -71,14 +138,17 @@ def _run_api_e2e() -> int:
     )
     from bap_desktop.settings import DesktopSettings
 
+    report("settings")
     settings = DesktopSettings()
     base_url = str(settings.api_base_url)
     username = "E2E" + uuid.uuid4().hex[:12]
     password = "BapE2E12345"
     auth = AuthApiClient(base_url)
+    report("register")
     created = auth.register(username, password)
     if created.get("username") != username:
         raise RuntimeError("register response did not contain the expected Username")
+    report("invalid_login")
     try:
         auth.login(username, password + "wrong")
     except ApiRejectedError as error:
@@ -86,6 +156,7 @@ def _run_api_e2e() -> int:
             raise
     else:
         raise RuntimeError("invalid login was unexpectedly accepted")
+    report("duplicate_register")
     try:
         auth.register(username, password)
     except ApiRejectedError as error:
@@ -93,8 +164,10 @@ def _run_api_e2e() -> int:
             raise
     else:
         raise RuntimeError("duplicate Username was unexpectedly accepted")
+    report("login")
     tokens = auth.login(username, password)
     analysis = AnalysisApiClient(base_url)
+    report("analysis_capabilities")
     capabilities = analysis.capabilities(tokens.access_token)
     punch_count = next(
         item for item in capabilities if item.specification.analysis_type == "punch_count"
@@ -144,17 +217,23 @@ def _run_api_e2e() -> int:
             session_id=uuid4(), desktop_version=__version__, started_at=now, ended_at=now,
             csv_files=tuple(descriptors), analyses=(job,),
         )
+        report("upload_session")
         accepted = analysis.upload(root, metadata, tokens.access_token)
+        report("analysis_status")
         result = analysis.analysis_status(
             accepted["session_id"], accepted["analysis_ids"][0], tokens.access_token
         )
         if result.get("status") != "completed" or result.get("result", {}).get("total_punch_count") != 2:
             raise RuntimeError("installed Desktop Session-to-Result E2E did not complete")
+    report("refresh_token")
     refreshed = auth.refresh(tokens.refresh_token)
+    report("logout")
     auth.logout(refreshed.refresh_token)
+    report("release_check")
     release = ReleaseApiClient(base_url).latest("windows")
     if not release.source_tree_sha:
         raise RuntimeError("release response did not contain Source Tree SHA")
+    report("completed")
     return 0
 
 
@@ -168,7 +247,8 @@ def main() -> int:
         Path(sys.argv[index + 1]).write_text(__version__, encoding="utf-8")
         return 0
     if "--api-e2e-test" in sys.argv:
-        return _run_api_e2e()
+        result_path = _argument_value("--api-e2e-result-file")
+        return _run_api_e2e_command(Path(result_path) if result_path else None)
     if "--post-update-health-check" in sys.argv:
         result_path = _argument_value("--result-file")
         if result_path is None:

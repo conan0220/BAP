@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -83,6 +84,28 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
     )
 
     assert _run_api_e2e() == 0
+
+
+def test_packaged_api_e2e_failure_is_machine_readable(tmp_path, monkeypatch) -> None:
+    import bap_desktop.app as desktop_app
+
+    def fail_during_upload(report_progress) -> int:
+        report_progress("upload_session")
+        raise RuntimeError("safe packaged E2E failure")
+
+    monkeypatch.setattr(desktop_app, "_run_api_e2e", fail_during_upload)
+    result_path = tmp_path / "api-e2e-result.json"
+
+    assert desktop_app._run_api_e2e_command(result_path) == 1
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result == {
+        "schema_version": 1,
+        "status": "failed",
+        "stage": "upload_session",
+        "desktop_version": desktop_app.__version__,
+        "error_type": "RuntimeError",
+        "message": "safe packaged E2E failure",
+    }
 
 
 @dataclass
