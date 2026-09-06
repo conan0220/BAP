@@ -88,6 +88,9 @@ def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> N
 
     smoke = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(encoding="utf-8")
     assert 'Arguments @("--api-e2e-test")' in smoke
+    assert "function Invoke-BapProcess" in smoke
+    assert "$Process.WaitForExit($TimeoutSeconds * 1000)" in smoke
+    assert "Start-Process -FilePath $LauncherExe -ArgumentList $LauncherArguments -PassThru -Wait" not in smoke
 
 
 @pytest.mark.scenario("pull-request-ci", "docs-only PR 不使用 Windows Runner")

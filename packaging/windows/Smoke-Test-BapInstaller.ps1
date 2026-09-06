@@ -29,6 +29,26 @@ if ($PreviousInstallerPath) {
     $PreviousVersion = $PreviousMatch.Groups["version"].Value
 }
 
+function Invoke-BapProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [Parameter(Mandatory = $true)][string]$Label,
+        [int]$TimeoutSeconds = 180
+    )
+
+    Write-Host "Starting $Label (timeout: $TimeoutSeconds seconds)."
+    $Process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru
+    if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        throw "$Label timed out after $TimeoutSeconds seconds."
+    }
+    if ($Process.ExitCode -ne 0) {
+        throw "$Label exited with $($Process.ExitCode)."
+    }
+    Write-Host "$Label completed."
+}
+
 function Invoke-BapAppCheck {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
@@ -38,8 +58,7 @@ function Invoke-BapAppCheck {
 
     Remove-Item -LiteralPath $LaunchResult -Force -ErrorAction SilentlyContinue
     $LauncherArguments = @("--program-root", $InstallDir, "--user-data-root", $DataDir, "--result-file", $LaunchResult, "--") + $Arguments
-    $Process = Start-Process -FilePath $LauncherExe -ArgumentList $LauncherArguments -PassThru -Wait
-    if ($Process.ExitCode -ne 0) { throw "$Label Launcher exited with $($Process.ExitCode)." }
+    Invoke-BapProcess -FilePath $LauncherExe -Arguments $LauncherArguments -Label "$Label Launcher" -TimeoutSeconds 30
     if (-not (Test-Path -LiteralPath $LaunchResult -PathType Leaf)) { throw "$Label did not produce a Launcher result." }
     $Started = Get-Content -LiteralPath $LaunchResult -Raw -Encoding UTF8 | ConvertFrom-Json
     $AppProcess = Get-Process -Id $Started.pid -ErrorAction SilentlyContinue
@@ -51,8 +70,7 @@ function Invoke-BapAppCheck {
 
 try {
     if ($PreviousInstallerPath) {
-        $PreviousInstall = Start-Process -FilePath $PreviousInstallerPath -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", ("/DIR=" + $InstallDir)) -Wait -PassThru
-        if ($PreviousInstall.ExitCode -ne 0) { throw "Previous BAP installer exited with $($PreviousInstall.ExitCode)." }
+        Invoke-BapProcess -FilePath $PreviousInstallerPath -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", ("/DIR=" + $InstallDir)) -Label "Previous BAP installer"
         if (-not (Test-Path -LiteralPath (Join-Path $InstallDir "BAP.exe") -PathType Leaf)) {
             throw "Previous public BAP Runtime was not installed as a Legacy Install."
         }
@@ -65,11 +83,10 @@ try {
     $PreviousBapEnvironment = $env:BAP_ENV
     try {
         $env:BAP_ENV = "test"
-        $Install = Start-Process -FilePath $InstallerPath -ArgumentList $InstallArguments -Wait -PassThru
+        Invoke-BapProcess -FilePath $InstallerPath -Arguments $InstallArguments -Label "Candidate BAP installer"
     } finally {
         $env:BAP_ENV = $PreviousBapEnvironment
     }
-    if ($Install.ExitCode -ne 0) { throw "BAP installer exited with $($Install.ExitCode)." }
     if (-not (Test-Path -LiteralPath $LauncherExe -PathType Leaf)) { throw "BAPLauncher.exe was not installed." }
     $StatePath = Join-Path $InstallDir "active-release.json"
     if (-not (Test-Path -LiteralPath $StatePath -PathType Leaf)) { throw "Active Release state was not created." }
@@ -155,8 +172,7 @@ try {
     Remove-Item -LiteralPath $VersionProbe -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $LaunchResult -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $Uninstaller -PathType Leaf) {
-        $Uninstall = Start-Process -FilePath $Uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
-        if ($Uninstall.ExitCode -ne 0) { throw "BAP uninstaller exited with $($Uninstall.ExitCode)." }
+        Invoke-BapProcess -FilePath $Uninstaller -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Label "BAP uninstaller"
     }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $DataDir "temp\imu-diagnostics\installer-smoke.csv") -PathType Leaf)) {
@@ -169,13 +185,11 @@ if ($RunRollbackTest) {
     $RollbackOperation = "rollback-test"
     $RollbackUninstaller = Join-Path $RollbackProgram "unins000.exe"
     try {
-        $PreviousInstall = Start-Process -FilePath $PreviousInstallerPath -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", ("/DIR=" + $RollbackProgram)) -Wait -PassThru
-        if ($PreviousInstall.ExitCode -ne 0) { throw "Rollback E2E could not install Previous Public Version." }
+        Invoke-BapProcess -FilePath $PreviousInstallerPath -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", ("/DIR=" + $RollbackProgram)) -Label "Rollback E2E Previous Public Version installer"
         $RollbackSentinel = Join-Path $RollbackData "sentinel\keep.txt"
         New-Item -ItemType Directory -Path (Split-Path $RollbackSentinel) -Force | Out-Null
         Set-Content -LiteralPath $RollbackSentinel -Value "rollback-must-preserve" -Encoding UTF8
-        $ManagedInstall = Start-Process -FilePath $InstallerPath -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/BAPMANAGED=1", ("/DIR=" + $RollbackProgram), ("/BAPDATADIR=" + $RollbackData)) -Wait -PassThru
-        if ($ManagedInstall.ExitCode -ne 0) { throw "Rollback E2E could not place Candidate files." }
+        Invoke-BapProcess -FilePath $InstallerPath -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/BAPMANAGED=1", ("/DIR=" + $RollbackProgram), ("/BAPDATADIR=" + $RollbackData)) -Label "Rollback E2E Candidate installer"
 
         $Updater = Join-Path $RollbackProgram "BAPUpdater.exe"
         $PreviousEnvironment = @($env:BAP_ENV, $env:BAP_TEST_SUPPRESS_READY_SIGNAL)
@@ -201,7 +215,7 @@ if ($RunRollbackTest) {
         }
     } finally {
         if (Test-Path -LiteralPath $RollbackUninstaller -PathType Leaf) {
-            Start-Process -FilePath $RollbackUninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait | Out-Null
+            Invoke-BapProcess -FilePath $RollbackUninstaller -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Label "Rollback E2E uninstaller"
         }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $RollbackData "sentinel\keep.txt") -PathType Leaf)) {
