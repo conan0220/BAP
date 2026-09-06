@@ -78,4 +78,4 @@
 - [x] 8.2 執行 Desktop unit／Qt／integration tests、Backend tests、Installer smoke tests、Workflow contract tests與 OpenSpec scenario coverage，修正所有失敗。
 - [x] 8.3 在乾淨 Windows 使用者環境完成現行公開版 → Candidate 的 Upgrade E2E，確認不需解除安裝、User Data 保留且新版由 Stable Launcher 啟動。
 - [x] 8.4 在乾淨 Windows 使用者環境完成 Candidate 故障 Rollback E2E，確認 previous 自動恢復、可正常啟動且 diagnostics 足以排查。
-- [ ] 8.5 將 feature branch push 到 GitHub，確認 required PR CI 通過、Candidate 可追溯，並人工 Merge 後確認 CD 使用同一份 Candidate 完成 Release Metadata 發布與 update-check 啟用。
+- [x] 8.5 將 feature branch push 到 GitHub，確認 required PR CI 通過、Candidate 可追溯，並人工 Merge 後確認 CD 使用同一份 Candidate 完成 Release Metadata 發布與 update-check 啟用。

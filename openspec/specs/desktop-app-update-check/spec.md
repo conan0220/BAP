@@ -7,13 +7,16 @@
 | 更新檢查 | Desktop App 啟動後，比較目前版本與最新版本的背景流程。 |
 | 更新提示 | 發現新版時顯示的版本與「立即更新」操作。 |
 | 更新資訊 | 最新版本號、適用作業系統、下載位置及必要的完整性資訊。 |
-| SHA-256 | Backend 提供的安裝檔雜湊值，用來確認下載內容完整且沒有被替換。 |
-| 覆蓋安裝 | 不要求 user 先解除安裝，直接以新版 Installer 更新既有的 BAP 安裝目錄。 |
+| SHA-256 | 用來確認下載檔內容與發布資訊完全一致的雜湊值。 |
 | Desktop 版本來源 | `bap_desktop/VERSION`，Installer、GitHub Release 與 App 執行時都以此為準。 |
+| Installer | Desktop App 從可信 HTTPS 位置下載的 Windows 安裝檔。 |
+| Updater | 將已驗證 Installer 安裝成獨立版本並處理版本切換的程式。 |
+| Clean Shutdown | Desktop App 停止 IMU、背景工作與檔案寫入後正常結束的流程。 |
+| Active Release | user 目前透過 Stable Launcher 啟動的 Desktop 版本。 |
 
 ## Purpose
 
-讓 Desktop App 在啟動後自動得知是否有新版，並讓 user 直接在 App 內下載、驗證及啟動覆蓋安裝，不需要先解除安裝，也不需要自行前往 GitHub Release。
+讓 Desktop App 在啟動後自動得知是否有新版，並讓 user 直接在 App 內下載及驗證 Installer，再由 Updater 安裝與切換獨立版本；user 不需要先解除安裝，也不需要自行前往 GitHub Release。
 
 ## 更新檢查流程
 
@@ -29,8 +32,15 @@ flowchart TD
     USER -->|稍後| CONTINUE
     DOWNLOAD --> VERIFY{SHA-256 正確？}
     VERIFY -->|否| FAILED[保留舊版並顯示更新失敗]
-    VERIFY -->|是| INSTALL[啟動靜默覆蓋安裝]
-    INSTALL --> RESTART[關閉目前 App 並啟動新版]
+    VERIFY -->|是| HANDOFF[交給 Updater]
+    HANDOFF --> SHUTDOWN[App 執行 Clean Shutdown]
+    SHUTDOWN --> INSTALL[安裝到獨立版本目錄]
+    INSTALL --> HEALTH{Health Check 通過？}
+    HEALTH -->|否| KEEP[保留目前 Active Release]
+    HEALTH -->|是| SWITCH[切換 Active Release 並啟動新版]
+    SWITCH --> READY{新版送出 Ready Signal？}
+    READY -->|是| DONE[更新完成]
+    READY -->|否| ROLLBACK[自動恢復 Previous Release]
 ```
 
 ## Requirements
@@ -61,26 +71,6 @@ Desktop App MUST 在每次啟動後透過 HTTPS 要求適用於目前作業系�
 - **THEN** Desktop App 在背景下載遠端後端提供的 Windows Installer
 - **AND** user 不需要開啟 GitHub Release 或手動解除安裝目前版本
 
-### Requirement: App 必須先驗證 Installer 再覆蓋安裝
-Desktop App MUST 使用更新資訊中的 SHA-256 驗證下載完成的 Installer；只有驗證成功才能啟動靜默覆蓋安裝。
-
-#### Scenario: Installer 通過完整性驗證
-- **WHEN** Installer 下載完成且實際 SHA-256 等於更新資訊中的 SHA-256
-- **THEN** Desktop App 啟動 Installer 覆蓋目前版本
-- **AND** Desktop App 關閉目前程序
-- **AND** Installer 安裝完成後啟動新版 BAP
-
-#### Scenario: Installer checksum 不符
-- **WHEN** Installer 的實際 SHA-256 不等於更新資訊中的 SHA-256
-- **THEN** Desktop App 刪除未通過驗證的下載檔
-- **AND** Desktop App 不啟動 Installer
-- **AND** 現有版本可以繼續使用
-
-#### Scenario: 更新下載或啟動失敗
-- **WHEN** Installer 無法下載、寫入或啟動
-- **THEN** Desktop App 顯示簡短的更新失敗訊息
-- **AND** 現有版本與 user 資料不受影響
-
 ### Requirement: Desktop 只能有一個版本來源
 Desktop App 的 Installer 版本、GitHub Release tag 與 App 執行時回報的目前版本 MUST 全部讀取 `bap_desktop/VERSION`，不得在其他 Desktop source code 內另外寫死版本號。Backend Release MUST 繼續使用 Git SHA 識別，不得拿 Desktop 版本號當成 Backend Release ID。
 
@@ -107,3 +97,38 @@ Desktop App 的 Installer 版本、GitHub Release tag 與 App 執行時回報的
 - **WHEN** Desktop App 收到的更新資訊沒有目前作業系統可用的 HTTPS 下載位置
 - **THEN** Desktop App 不顯示可執行的「立即更新」操作
 - **AND** Desktop App 將這次更新檢查顯示為無法取得有效更新資訊
+
+### Requirement: App 必須先驗證 Installer 再交由 Updater 安裝
+Desktop App MUST 使用更新資訊中的 SHA-256 驗證下載完成的 Installer；只有驗證成功，才能要求 Updater 將 Candidate 安裝到獨立版本目錄並執行 Health Check、切換與必要的 Rollback。
+
+#### Scenario: Installer 通過完整性驗證
+- **WHEN** Installer 下載完成且實際 SHA-256 等於更新資訊中的 SHA-256
+- **THEN** Desktop App 啟動獨立 Updater
+- **AND** Updater 將 Candidate 安裝到新的版本目錄
+- **AND** Updater 不直接覆蓋 Active Release 的程式檔
+
+#### Scenario: Installer checksum 不符
+- **WHEN** Installer 的實際 SHA-256 不等於更新資訊中的 SHA-256
+- **THEN** Desktop App 刪除未通過驗證的下載檔
+- **AND** Desktop App 不啟動 Updater
+- **AND** 現有版本可以繼續使用
+
+#### Scenario: 更新下載或 Updater 啟動失敗
+- **WHEN** Installer 無法下載、寫入、驗證或交給 Updater
+- **THEN** Desktop App 顯示簡短的更新失敗訊息
+- **AND** Active Release 與 User Data 不受影響
+
+### Requirement: Desktop App 必須乾淨交接更新程序
+Desktop App MUST 在 Updater 確認已接手更新後執行 Clean Shutdown，停止 IMU 連線、背景工作與檔案寫入；不得只直接結束 Qt 程序而略過既有的關閉清理流程。
+
+#### Scenario: Updater 成功接手
+- **WHEN** user 選擇立即更新且 Updater 已成功啟動並確認收到更新工作
+- **THEN** Desktop App 執行與正常關閉相同的資源清理
+- **AND** Desktop App 完成清理後結束
+- **AND** Updater 等待舊程序結束後再安裝 Candidate
+
+#### Scenario: Updater 未成功接手
+- **WHEN** Desktop App 無法啟動 Updater 或沒有收到接手確認
+- **THEN** Desktop App 保持運行
+- **AND** Desktop App 顯示更新尚未開始
+- **AND** 系統不得關閉目前版本
