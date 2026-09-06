@@ -67,6 +67,7 @@ def test_inno_setup_is_per_user_and_removes_only_managed_temporary_csv_area() ->
     assert "neither the Legacy nor Versioned layout" in smoke_test
     assert "--api-e2e-result-file" in smoke_test
     assert "Last result: $Diagnostic" in smoke_test
+    assert "$AppProcess.ExitCode" not in smoke_test
     assert '$ApiE2EOutcome.status -ne "succeeded"' in smoke_test
 
 

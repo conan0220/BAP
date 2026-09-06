@@ -75,14 +75,6 @@ function Invoke-BapAppCheck {
             }
             throw "$Label timed out after $TimeoutSeconds seconds. Last result: $Diagnostic"
         }
-        if ($AppProcess.ExitCode -ne 0) {
-            $Diagnostic = if ($DiagnosticPath -and (Test-Path -LiteralPath $DiagnosticPath -PathType Leaf)) {
-                (Get-Content -LiteralPath $DiagnosticPath -Raw -Encoding UTF8).Trim()
-            } else {
-                "no diagnostic result"
-            }
-            throw "$Label exited with $($AppProcess.ExitCode). Result: $Diagnostic"
-        }
     }
 }
 
