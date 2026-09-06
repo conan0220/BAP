@@ -58,9 +58,17 @@ def test_inno_setup_is_per_user_and_removes_only_managed_temporary_csv_area() ->
     assert "WaitForExit($TimeoutSeconds * 1000)" in smoke_test
     assert 'Arguments @("--write-version", $VersionProbe)' in smoke_test
     assert "does not match Installer version" in smoke_test
-    assert 'Arguments @("--api-e2e-test")' in smoke_test
+    assert 'Arguments @("--api-e2e-test", "--api-e2e-result-file", $ApiE2EResult)' in smoke_test
     assert "BAP packaged Updater handoff E2E passed." in smoke_test
     assert "accepted.json" not in smoke_test
+    assert '$LegacyPreviousExe = Join-Path $InstallDir "BAP.exe"' in smoke_test
+    assert '("releases\\" + $PreviousVersion + "\\BAP.exe")' in smoke_test
+    assert "$PreviousState.active_version -ne $PreviousVersion" in smoke_test
+    assert "neither the Legacy nor Versioned layout" in smoke_test
+    assert "--api-e2e-result-file" in smoke_test
+    assert "Last result: $Diagnostic" in smoke_test
+    assert "$AppProcess.ExitCode" not in smoke_test
+    assert '$ApiE2EOutcome.status -ne "succeeded"' in smoke_test
 
 
 def test_desktop_candidate_is_built_in_pr_and_only_promoted_in_cd() -> None:

@@ -17,6 +17,7 @@ $LauncherExe = Join-Path $InstallDir "BAPLauncher.exe"
 $Uninstaller = Join-Path $InstallDir "unins000.exe"
 $VersionProbe = Join-Path $env:TEMP ("bap-version-" + [Guid]::NewGuid().ToString("N") + ".txt")
 $LaunchResult = Join-Path $env:TEMP ("bap-launch-" + [Guid]::NewGuid().ToString("N") + ".json")
+$ApiE2EResult = Join-Path $env:TEMP ("bap-api-e2e-" + [Guid]::NewGuid().ToString("N") + ".json")
 $InstallerName = [IO.Path]::GetFileName($InstallerPath)
 $VersionMatch = [regex]::Match($InstallerName, '^BAP-Setup-(?<version>\d+\.\d+\.\d+(?:[+-][0-9A-Za-z.-]+)?)\.exe$')
 if (-not $VersionMatch.Success) { throw "BAP installer filename does not contain a valid version." }
@@ -53,26 +54,54 @@ function Invoke-BapAppCheck {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$Label,
-        [int]$TimeoutSeconds = 120
+        [int]$TimeoutSeconds = 120,
+        [string]$DiagnosticPath
     )
 
     Remove-Item -LiteralPath $LaunchResult -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $ApiE2EResult -Force -ErrorAction SilentlyContinue
     $LauncherArguments = @("--program-root", $InstallDir, "--user-data-root", $DataDir, "--result-file", $LaunchResult, "--") + $Arguments
     Invoke-BapProcess -FilePath $LauncherExe -Arguments $LauncherArguments -Label "$Label Launcher" -TimeoutSeconds 30
     if (-not (Test-Path -LiteralPath $LaunchResult -PathType Leaf)) { throw "$Label did not produce a Launcher result." }
     $Started = Get-Content -LiteralPath $LaunchResult -Raw -Encoding UTF8 | ConvertFrom-Json
     $AppProcess = Get-Process -Id $Started.pid -ErrorAction SilentlyContinue
-    if ($AppProcess -and -not $AppProcess.WaitForExit($TimeoutSeconds * 1000)) {
-        Stop-Process -Id $AppProcess.Id -Force -ErrorAction SilentlyContinue
-        throw "$Label timed out after $TimeoutSeconds seconds."
+    if ($AppProcess) {
+        if (-not $AppProcess.WaitForExit($TimeoutSeconds * 1000)) {
+            Stop-Process -Id $AppProcess.Id -Force -ErrorAction SilentlyContinue
+            $Diagnostic = if ($DiagnosticPath -and (Test-Path -LiteralPath $DiagnosticPath -PathType Leaf)) {
+                (Get-Content -LiteralPath $DiagnosticPath -Raw -Encoding UTF8).Trim()
+            } else {
+                "no diagnostic result"
+            }
+            throw "$Label timed out after $TimeoutSeconds seconds. Last result: $Diagnostic"
+        }
     }
 }
 
 try {
     if ($PreviousInstallerPath) {
         Invoke-BapProcess -FilePath $PreviousInstallerPath -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", ("/DIR=" + $InstallDir)) -Label "Previous BAP installer"
-        if (-not (Test-Path -LiteralPath (Join-Path $InstallDir "BAP.exe") -PathType Leaf)) {
-            throw "Previous public BAP Runtime was not installed as a Legacy Install."
+        $LegacyPreviousExe = Join-Path $InstallDir "BAP.exe"
+        $VersionedPreviousExe = Join-Path $InstallDir ("releases\" + $PreviousVersion + "\BAP.exe")
+        $PreviousStatePath = Join-Path $InstallDir "active-release.json"
+        $PreviousLauncher = Join-Path $InstallDir "BAPLauncher.exe"
+        $PreviousIsLegacy = Test-Path -LiteralPath $LegacyPreviousExe -PathType Leaf
+        $PreviousIsVersioned =
+            (Test-Path -LiteralPath $PreviousLauncher -PathType Leaf) -and
+            (Test-Path -LiteralPath $PreviousStatePath -PathType Leaf) -and
+            (Test-Path -LiteralPath $VersionedPreviousExe -PathType Leaf)
+
+        if (-not $PreviousIsLegacy -and -not $PreviousIsVersioned) {
+            throw "Previous public BAP Runtime was installed in neither the Legacy nor Versioned layout."
+        }
+        if ($PreviousIsVersioned) {
+            $PreviousState = Get-Content -LiteralPath $PreviousStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($PreviousState.active_version -ne $PreviousVersion) {
+                throw "Previous Versioned Install did not activate $PreviousVersion."
+            }
+            Write-Output "Previous public BAP Runtime $PreviousVersion uses the Versioned Install layout."
+        } else {
+            Write-Output "Previous public BAP Runtime $PreviousVersion uses the Legacy Install layout."
         }
     }
     $Sentinel = Join-Path $DataDir "sentinel\keep.txt"
@@ -114,7 +143,19 @@ try {
         $PreviousApiBaseUrl = $env:BAP_API_BASE_URL
         try {
             $env:BAP_API_BASE_URL = $ApiBaseUrl
-            Invoke-BapAppCheck -Arguments @("--api-e2e-test") -Label "Installed BAP API E2E" -TimeoutSeconds 120
+            Remove-Item -LiteralPath $ApiE2EResult -Force -ErrorAction SilentlyContinue
+            Invoke-BapAppCheck `
+                -Arguments @("--api-e2e-test", "--api-e2e-result-file", $ApiE2EResult) `
+                -Label "Installed BAP API E2E" `
+                -TimeoutSeconds 120 `
+                -DiagnosticPath $ApiE2EResult
+            if (-not (Test-Path -LiteralPath $ApiE2EResult -PathType Leaf)) {
+                throw "Installed BAP API E2E did not produce a diagnostic result."
+            }
+            $ApiE2EOutcome = Get-Content -LiteralPath $ApiE2EResult -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($ApiE2EOutcome.status -ne "succeeded") {
+                throw "Installed BAP API E2E failed at $($ApiE2EOutcome.stage): $($ApiE2EOutcome.message)"
+            }
         } finally {
             $env:BAP_API_BASE_URL = $PreviousApiBaseUrl
         }
@@ -171,6 +212,7 @@ try {
 } finally {
     Remove-Item -LiteralPath $VersionProbe -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $LaunchResult -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $ApiE2EResult -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $Uninstaller -PathType Leaf) {
         Invoke-BapProcess -FilePath $Uninstaller -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Label "BAP uninstaller"
     }
