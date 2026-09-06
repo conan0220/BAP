@@ -73,3 +73,9 @@ CI Gate 通過且人工 review 完成後，開發者才到 GitHub 按下 Merge�
 Merge 後的 CD 會下載同一份已測 Candidate，依 scope 自動部署 Backend 或發布 Desktop Release；開發者不需要在本機執行 SCP、SSH 或正式 Build。
 
 管理者設定、Server Initialize、Artifact I/O、Rollback 與通知方式請見 [CI/CD 操作指南](docs/guides/ci-cd.md)。
+
+## Desktop 更新與修復
+
+Windows 版會把每個版本放在獨立目錄，桌面捷徑固定指向 `BAPLauncher.exe`。新版必須通過本機檢查並成功開啟，才會繼續作為目前版本；若啟動失敗，Updater 會自動切回上一版。user 的登入資訊、logs 與量測資料位於 `%LOCALAPPDATA%\BAP`，更新、Rollback 與解除安裝程式版本都不會刪除這些資料。
+
+完整目錄、更新流程、log 位置與人工修復方式請見 [Desktop 發布與更新指南](docs/guides/desktop-release.md)。

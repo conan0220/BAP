@@ -9,6 +9,42 @@ from pathlib import Path
 from bap_desktop import APP_NAME, PRODUCT_NAME, __version__
 
 
+def _argument_value(name: str) -> str | None:
+    if name not in sys.argv:
+        return None
+    index = sys.argv.index(name)
+    return sys.argv[index + 1] if index + 1 < len(sys.argv) else None
+
+
+def _qt_arguments(arguments: list[str]) -> list[str]:
+    private_with_value = {"--update-operation"}
+    private_flags = {"--smoke-test"}
+    filtered = [arguments[0]]
+    index = 1
+    while index < len(arguments):
+        item = arguments[index]
+        if item in private_flags:
+            index += 1
+            continue
+        if item in private_with_value:
+            index += 2
+            continue
+        filtered.append(item)
+        index += 1
+    return filtered
+
+
+def _installed_program_root() -> Path | None:
+    """Find Program Root from a frozen versioned Runtime; use defaults in development."""
+
+    if not getattr(sys, "frozen", False):
+        return None
+    executable_dir = Path(sys.executable).resolve().parent
+    if executable_dir.parent.name.lower() == "releases":
+        return executable_dir.parent.parent
+    return executable_dir
+
+
 def _run_api_e2e() -> int:
     """Exercise the packaged clients against a real CI Backend over HTTP."""
 
@@ -133,7 +169,18 @@ def main() -> int:
         return 0
     if "--api-e2e-test" in sys.argv:
         return _run_api_e2e()
+    if "--post-update-health-check" in sys.argv:
+        result_path = _argument_value("--result-file")
+        if result_path is None:
+            return 2
+        from bap_desktop.update_runtime.health import run_post_update_health_check
 
+        return run_post_update_health_check(
+            Path(result_path),
+            expected_version=_argument_value("--expected-version"),
+        )
+
+    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
     from bap_desktop.api_client import (
@@ -151,7 +198,7 @@ def main() -> int:
     from bap_desktop.ui.styles import apply_bap_style
 
     smoke_test = "--smoke-test" in sys.argv
-    app = QApplication(sys.argv)
+    app = QApplication(_qt_arguments(sys.argv))
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName(PRODUCT_NAME)
@@ -168,7 +215,10 @@ def main() -> int:
         current_version=__version__,
         platform="windows",
     )
-    update_installer = UpdateInstaller(settings.update_dir)
+    update_installer = UpdateInstaller(
+        settings.update_dir,
+        program_root=_installed_program_root(),
+    )
     window = MainWindow(
         session,
         diagnostic_service_factory=lambda: ImuDiagnosticsService(temp_dir=settings.temp_imu_dir),
@@ -179,7 +229,16 @@ def main() -> int:
         measurement_sessions_dir=settings.measurement_sessions_dir,
         desktop_version=__version__,
     )
+    app.aboutToQuit.connect(window.shutdown)
     window.show()
+    operation_id = _argument_value("--update-operation")
+    if operation_id:
+        from bap_desktop.update_runtime.health import write_ready_signal
+
+        QTimer.singleShot(
+            0,
+            lambda: write_ready_signal(settings.update_dir, operation_id),
+        )
     if smoke_test:
         app.processEvents()
         window.hide()

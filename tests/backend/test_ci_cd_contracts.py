@@ -142,12 +142,23 @@ def test_candidate_validates_tree_and_checksums(tmp_path) -> None:
     desktop_hash = sha256_file(desktop)
     (tmp_path / "BAP-Setup-0.1.0.metadata.json").write_text(
         json.dumps({
+            "schema_version": 1,
             "project": "BAP",
             "component": "desktop",
             "version": "0.1.0",
+            "platform": "windows",
+            "architecture": "x86_64",
             "source_tree_sha": TREE,
-            "filename": desktop.name,
-            "sha256": desktop_hash,
+            "installer_filename": desktop.name,
+            "installer_size_bytes": desktop.stat().st_size,
+            "installer_sha256": desktop_hash,
+            "runtime_entries": {
+                "desktop": "releases/0.1.0/BAP.exe",
+                "launcher": "BAPLauncher.exe",
+                "updater": "BAPUpdater.exe",
+            },
+            "candidate_run_id": "99",
+            "created_at": datetime.now(UTC).isoformat(),
         }),
         encoding="utf-8",
     )

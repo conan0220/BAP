@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from bap_desktop.services.update import (
     UpdateResult,
     UpdateService,
     UpdateStatus,
+    consume_latest_update_outcome,
 )
 from bap_desktop.ui.main_window import MainWindow
 
@@ -39,6 +41,9 @@ class _ReleaseClient:
 class _Session:
     api = object()
 
+    def __init__(self) -> None:
+        self.closed = False
+
     def restore(self) -> bool:
         return False
 
@@ -46,7 +51,7 @@ class _Session:
         pass
 
     def close(self) -> None:
-        pass
+        self.closed = True
 
 
 def _release(**overrides) -> ReleaseData:
@@ -177,8 +182,9 @@ def test_update_banner_does_not_block_login_and_installs_only_after_user_action(
     )
     installer = _ImmediateInstaller()
     quit_requests = []
+    session = _Session()
     window = MainWindow(
-        _Session(),  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
         update_service=service,  # type: ignore[arg-type]
         update_installer=installer,  # type: ignore[arg-type]
         quit_for_update=lambda: quit_requests.append(True),
@@ -201,10 +207,30 @@ def test_update_banner_does_not_block_login_and_installs_only_after_user_action(
     qtbot.waitUntil(lambda: installer.calls != [] and quit_requests == [True])
     assert installer.calls[0].download_url == DOWNLOAD_URL
     assert window.update_banner.message.text() == text.UPDATE_INSTALLING
+    assert session.closed
+    assert installer.closed
+
+
+class _LiveProcess:
+    def poll(self):
+        return None
+
+
+def _accepting_updater(records: list[tuple[Path, list[str]]]):
+    def launch(path: Path, arguments: list[str]):
+        records.append((path, arguments))
+        operation_id = arguments[arguments.index("--operation-id") + 1]
+        user_data_root = Path(arguments[arguments.index("--user-data-root") + 1])
+        accepted = user_data_root / "updates" / operation_id / "accepted.json"
+        accepted.parent.mkdir(parents=True, exist_ok=True)
+        accepted.write_text(json.dumps({"operation_id": operation_id}), encoding="utf-8")
+        return _LiveProcess()
+
+    return launch
 
 
 @pytest.mark.scenario("desktop-app-update-check", "Installer 通過完整性驗證")
-def test_update_installer_verifies_download_and_launches_silent_in_place_upgrade(tmp_path) -> None:
+def test_update_installer_verifies_download_and_hands_off_to_updater(tmp_path) -> None:
     payload = b"signed installer bytes"
     expected = hashlib.sha256(payload).hexdigest()
     launched = []
@@ -216,18 +242,21 @@ def test_update_installer_verifies_download_and_launches_silent_in_place_upgrade
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     installer = UpdateInstaller(
-        tmp_path,
+        tmp_path / "data" / "updates",
         client=client,
-        launcher=lambda path, arguments: launched.append((path, arguments)),
+        launcher=_accepting_updater(launched),
+        program_root=tmp_path / "program",
     )
     result = UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL, expected)
 
     destination = installer.download_and_launch(result, progress=progress.append)
 
     assert destination.read_bytes() == payload
-    assert launched == [(destination, UpdateInstaller.INSTALL_ARGUMENTS)]
+    assert launched[0][0] == tmp_path / "program" / "BAPUpdater.exe"
+    assert launched[0][1][0] == "handoff"
+    assert launched[0][1][launched[0][1].index("--installer") + 1] == str(destination)
+    assert launched[0][1][launched[0][1].index("--version") + 1] == "0.2.0"
     assert progress[-1] == 100
-    assert "/BAPAUTOSTART=1" in launched[0][1]
 
 
 @pytest.mark.scenario("desktop-app-update-check", "Installer checksum 不符")
@@ -237,9 +266,10 @@ def test_update_installer_rejects_bad_checksum_and_never_launches(tmp_path) -> N
     )
     launched = []
     installer = UpdateInstaller(
-        tmp_path,
+        tmp_path / "data" / "updates",
         client=client,
         launcher=lambda path, arguments: launched.append((path, arguments)),
+        program_root=tmp_path / "program",
     )
     result = UpdateResult(UpdateStatus.AVAILABLE, "0.1.0", "0.2.0", DOWNLOAD_URL, "a" * 64)
 
@@ -247,7 +277,62 @@ def test_update_installer_rejects_bad_checksum_and_never_launches(tmp_path) -> N
         installer.download_and_launch(result)
 
     assert launched == []
-    assert list(tmp_path.iterdir()) == []
+    assert not (tmp_path / "data" / "updates").exists() or list(
+        (tmp_path / "data" / "updates").iterdir()
+    ) == []
+
+
+@pytest.mark.scenario("desktop-app-update-check", "Updater 未成功接手")
+def test_update_installer_keeps_current_app_when_updater_exits_without_ack(tmp_path) -> None:
+    payload = b"installer"
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=payload))
+    )
+
+    class _ExitedProcess:
+        def poll(self):
+            return 1
+
+    installer = UpdateInstaller(
+        tmp_path / "data" / "updates",
+        client=client,
+        launcher=lambda _path, _arguments: _ExitedProcess(),
+        program_root=tmp_path / "program",
+        handoff_timeout=0.01,
+    )
+    result = UpdateResult(
+        UpdateStatus.AVAILABLE,
+        "0.1.0",
+        "0.2.0",
+        DOWNLOAD_URL,
+        hashlib.sha256(payload).hexdigest(),
+    )
+
+    with pytest.raises(UpdateInstallError, match="未成功接手"):
+        installer.download_and_launch(result)
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        ("rolled_back", "已恢復 BAP 0.1.6"),
+        ("rollback_failed", r"請直接執行 C:\\BAP\\releases\\0.1.6\\BAP.exe"),
+    ],
+)
+def test_restarted_app_consumes_terminal_update_outcome_once(tmp_path, status, message) -> None:
+    operation = tmp_path / "updates" / "op-1"
+    operation.mkdir(parents=True)
+    (operation / "operation.json").write_text(
+        json.dumps({"status": status, "message": message}),
+        encoding="utf-8",
+    )
+
+    outcome = consume_latest_update_outcome(tmp_path / "updates")
+
+    assert outcome is not None
+    assert outcome.status == status
+    assert outcome.message == message
+    assert consume_latest_update_outcome(tmp_path / "updates") is None
 
 
 @pytest.mark.scenario("desktop-app-update-check", "更新下載或啟動失敗")
@@ -268,7 +353,7 @@ def test_update_failure_keeps_app_open_and_allows_retry(qtbot) -> None:
 
     window.update_banner.download_button.click()
 
-    qtbot.waitUntil(lambda: window.update_banner.message.text() == text.UPDATE_FAILED)
+    qtbot.waitUntil(lambda: window.update_banner.message.text() == "offline")
     assert quit_requests == []
     assert window.update_banner.download_button.isEnabled()
     assert window.stack.currentWidget() is window.auth_page

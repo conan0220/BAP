@@ -67,6 +67,16 @@ jobs:
           $tree = git rev-parse "HEAD^{tree}"
           "value=$tree" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "BAP_SOURCE_TREE_SHA=$tree" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Reject an invalid or already published Desktop version
+        if: needs.classify.outputs.desktop_changed == 'true'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content -LiteralPath ".\bap_desktop\VERSION" -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw "Desktop VERSION is invalid." }
+          gh release view "desktop-v$version" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Desktop version is already published: desktop-v$version" }
       - name: Run source-level automated tests
         shell: powershell
         run: .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp "$env:RUNNER_TEMP\pytest"
@@ -86,6 +96,35 @@ jobs:
             -OutputDirectory "$env:RUNNER_TEMP\bap-candidate" `
             -WorkDirectory "$env:RUNNER_TEMP\bap-desktop-build" `
             -PythonPath "$env:GITHUB_WORKSPACE\.venv\Scripts\python.exe"
+      - id: previous
+        name: Download Previous Public Desktop Installer
+        if: needs.classify.outputs.desktop_changed == 'true'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $current = [version](Get-Content -LiteralPath ".\bap_desktop\VERSION" -Raw).Trim()
+          $releases = gh release list --repo "${{ github.repository }}" --limit 100 --json tagName,isDraft,isPrerelease | ConvertFrom-Json
+          $previous = $releases |
+            Where-Object { -not $_.isDraft -and -not $_.isPrerelease -and $_.tagName -match '^desktop-v\d+\.\d+\.\d+$' } |
+            ForEach-Object { [pscustomobject]@{ tag = $_.tagName; version = [version]($_.tagName -replace '^desktop-v','') } } |
+            Where-Object { $_.version -lt $current } |
+            Sort-Object version -Descending |
+            Select-Object -First 1
+          if (-not $previous) {
+            "version=none" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "path=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "No Previous Public Version exists; CI will run the fresh-install branch." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            exit 0
+          }
+          $destination = "$env:RUNNER_TEMP\previous-desktop"
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          gh release download $previous.tag --repo "${{ github.repository }}" --pattern "BAP-Setup-*.exe" --dir $destination
+          if ($LASTEXITCODE -ne 0) { throw "Unable to download Previous Public Version." }
+          [array]$files = @(Get-ChildItem -LiteralPath $destination -Filter "BAP-Setup-*.exe" -File)
+          if ($files.Count -ne 1) { throw "Expected one Previous Public Installer." }
+          "version=$($previous.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "path=$($files[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
       - name: Test unpacked Backend and installed Desktop
         shell: powershell
         run: |
@@ -101,7 +140,8 @@ jobs:
             -DesktopInstaller $installer.FullName `
             -SourceTreeSha "$env:BAP_SOURCE_TREE_SHA" `
             -UvPath "${{ steps.setup-uv.outputs.uv-path }}" `
-            -WorkDirectory "$env:RUNNER_TEMP\bap-candidate-e2e"
+            -WorkDirectory "$env:RUNNER_TEMP\bap-candidate-e2e" `
+            -PreviousDesktopInstaller "${{ steps.previous.outputs.path }}"
       - name: Create immutable delivery manifest
         shell: powershell
         run: |
@@ -118,6 +158,9 @@ jobs:
             desktop_package = "passed"
             installed_http_e2e = "passed"
             cleanup = "passed"
+            previous_public_version = "${{ steps.previous.outputs.version || 'not-required' }}"
+            upgrade_e2e = if ("${{ steps.previous.outputs.version }}" -eq "none") { "fresh-install-only" } else { "passed" }
+            rollback_e2e = if ("${{ steps.previous.outputs.version }}" -eq "none") { "skipped-no-previous" } else { "passed" }
           } | ConvertTo-Json | Set-Content "$candidate\test-summary.json" -Encoding utf8
           .\.venv\Scripts\python.exe -m bap_backend.tools.delivery_candidate create `
             --output "$candidate\delivery-manifest.json" `
