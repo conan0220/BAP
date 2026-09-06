@@ -61,6 +61,10 @@ def test_inno_setup_is_per_user_and_removes_only_managed_temporary_csv_area() ->
     assert 'Arguments @("--api-e2e-test")' in smoke_test
     assert "BAP packaged Updater handoff E2E passed." in smoke_test
     assert "accepted.json" not in smoke_test
+    assert '$LegacyPreviousExe = Join-Path $InstallDir "BAP.exe"' in smoke_test
+    assert '("releases\\" + $PreviousVersion + "\\BAP.exe")' in smoke_test
+    assert "$PreviousState.active_version -ne $PreviousVersion" in smoke_test
+    assert "neither the Legacy nor Versioned layout" in smoke_test
 
 
 def test_desktop_candidate_is_built_in_pr_and_only_promoted_in_cd() -> None:

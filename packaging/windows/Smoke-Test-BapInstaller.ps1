@@ -71,8 +71,27 @@ function Invoke-BapAppCheck {
 try {
     if ($PreviousInstallerPath) {
         Invoke-BapProcess -FilePath $PreviousInstallerPath -Arguments @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", ("/DIR=" + $InstallDir)) -Label "Previous BAP installer"
-        if (-not (Test-Path -LiteralPath (Join-Path $InstallDir "BAP.exe") -PathType Leaf)) {
-            throw "Previous public BAP Runtime was not installed as a Legacy Install."
+        $LegacyPreviousExe = Join-Path $InstallDir "BAP.exe"
+        $VersionedPreviousExe = Join-Path $InstallDir ("releases\" + $PreviousVersion + "\BAP.exe")
+        $PreviousStatePath = Join-Path $InstallDir "active-release.json"
+        $PreviousLauncher = Join-Path $InstallDir "BAPLauncher.exe"
+        $PreviousIsLegacy = Test-Path -LiteralPath $LegacyPreviousExe -PathType Leaf
+        $PreviousIsVersioned =
+            (Test-Path -LiteralPath $PreviousLauncher -PathType Leaf) -and
+            (Test-Path -LiteralPath $PreviousStatePath -PathType Leaf) -and
+            (Test-Path -LiteralPath $VersionedPreviousExe -PathType Leaf)
+
+        if (-not $PreviousIsLegacy -and -not $PreviousIsVersioned) {
+            throw "Previous public BAP Runtime was installed in neither the Legacy nor Versioned layout."
+        }
+        if ($PreviousIsVersioned) {
+            $PreviousState = Get-Content -LiteralPath $PreviousStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($PreviousState.active_version -ne $PreviousVersion) {
+                throw "Previous Versioned Install did not activate $PreviousVersion."
+            }
+            Write-Output "Previous public BAP Runtime $PreviousVersion uses the Versioned Install layout."
+        } else {
+            Write-Output "Previous public BAP Runtime $PreviousVersion uses the Legacy Install layout."
         }
     }
     $Sentinel = Join-Path $DataDir "sentinel\keep.txt"
