@@ -7,12 +7,15 @@
 | 無線來源 | 經由無線接收器 Port 輸出的 IMU 來源，以 Port、Group ID 與 Node ID 一起識別。 |
 | 候選 Port | 作業系統在探索開始時列出的所有序列埠。 |
 | 可用來源 | 在本次三秒探索中至少成功解析一筆相符資料的有線來源或無線 Node。 |
-| 拳擊測量項目 | 目前只提供入口及來源選擇，完成後顯示「待開發」的單一拳擊功能。 |
+| 拳擊測量項目 | user 一次進入並操作的一個拳擊分析功能。 |
 | IMU 來源 | 本次三秒探索找到的一顆可用 IMU；有線來源以 Port 識別，無線來源以 Port、Group ID 與 Node ID 一起識別。 |
 | IMU 位置 | 測量項目要求放置 IMU 的身體或器材位置。 |
 | IMU 分配 | user 把一顆探索到的 IMU 指定給一個 IMU 位置。 |
-| 有效分配 | 每個必要位置都有一顆可用 IMU，且同一項目中沒有重複使用同一顆 IMU。 |
+| 有效分配 | 每個必要 Input Role 都分配到一顆本次探索找到的可用 IMU，且不違反該 Analysis Specification 的重複使用規則。 |
 | 手把背面 | 持把人握住的拳靶或手把背面，用來安裝拳種辨識需要的 IMU。 |
+| Registered Analysis | Desktop App 與 Backend 支援相同 Analysis Specification，而且 Backend 已提供可執行 Executor 的分析項目。 |
+| Session 準備 | 完成 IMU 分配後、正式錄製開始前，用來確認分析能力與本次設定的畫面。 |
+| 待開發 | Analysis Specification 或 Executor 尚未提供，因此不能開始正式測量的狀態。 |
 
 ## Purpose
 
@@ -30,8 +33,10 @@ flowchart TD
     CLASSIFY -->|沒有可用來源| ERR[顯示逐 Port 原因與再次確認]
     WP & WN --> PICK[user 為每個必要位置選擇不同 IMU]
     PICK --> VALID{已完成所有必要位置且沒有重複？}
-    VALID -->|是| PENDING[顯示該項目待開發]
+    VALID -->|是| CAPABILITY{Backend Executor 可執行？}
     VALID -->|否| PICK
+    CAPABILITY -->|是| READY[進入 Session 準備]
+    CAPABILITY -->|否| PENDING[顯示該項目待開發]
 ```
 
 ## Requirements
@@ -87,25 +92,28 @@ Desktop App MUST 在三秒探索期間顯示「正在確認 IMU，請稍後。�
 - **WHEN** user 在找不到來源的畫面按下「再次確認」
 - **THEN** Desktop App 重新列出所有候選 Port 並執行新的三秒探索
 
-### Requirement: 完成選擇後只顯示待開發
-Desktop App MUST 在 user 為目前拳擊測量項目的所有必要位置完成有效分配後，才允許 user 繼續並顯示該項目「待開發」；系統不得繼續錄製拳擊資料或呼叫遠端後端上傳 IMU 資料。
+### Requirement: 完成選擇後必須依分析能力決定下一步
+Desktop App MUST 在 user 完成目前拳擊項目的有效 IMU 分配後，確認相同版本的 Analysis Specification 與 Backend Executor 是否可用。可執行時 MUST 進入 Session 準備流程；不可執行時 MUST 顯示待開發，且不得錄製或上傳正式測量資料。三秒探索資料在來源確認完成後 MUST 清除，不得混入正式 Session CSV。
 
-#### Scenario: 完成所有必要位置的分配並繼續
-- **WHEN** user 已為目前項目的所有必要位置選好不同的可用 IMU，並執行「繼續」
-- **THEN** Desktop App 顯示目前拳擊測量項目「待開發」
-- **AND** 三秒探索資料在不再需要後從本機暫存中清除
-- **AND** 遠端後端沒有收到探索資料
+#### Scenario: 已註冊分析完成有效分配
+- **WHEN** user 已為 Registered Analysis 的所有 Input Roles 完成有效 IMU 分配並執行「繼續」
+- **THEN** Desktop App 進入 Session 準備畫面
+- **AND** 正式錄製尚未開始
 
-#### Scenario: 尚有位置未分配
-- **WHEN** 目前項目仍有至少一個必要位置尚未選擇 IMU
+#### Scenario: 分析 Executor 尚未提供
+- **WHEN** user 完成 IMU 分配，但 Backend 沒有該 Analysis Type 與版本的 Executor
+- **THEN** Desktop App 顯示該項目待開發或目前無法分析
+- **AND** Desktop App 不錄製或上傳正式測量資料
+
+#### Scenario: 探索資料與正式資料分離
+- **WHEN** Desktop App 使用三秒探索資料完成 IMU 來源確認
+- **THEN** Desktop App 在不再需要後清除探索暫存資料
+- **AND** user 按下「開始測量」後才建立正式 Session CSV
+
+#### Scenario: 尚有必要 Input Role 未分配
+- **WHEN** 目前項目仍有至少一個必要 Input Role 尚未選擇 IMU
 - **THEN** 「繼續」操作保持不可使用
-- **AND** Desktop App 不進入待開發結果頁面
-
-#### Scenario: 選好來源並繼續
-- **WHEN** user 為目前項目的所有必要位置選好不同的可用 IMU 來源並繼續
-- **THEN** Desktop App 顯示目前拳擊測量項目「待開發」
-- **AND** 三秒探索資料在不再需要後從本機暫存中清除
-- **AND** 遠端後端沒有收到探索資料
+- **AND** Desktop App 不進入 Session 準備畫面
 
 ### Requirement: user 必須依測量項目需要分配 IMU 來源
 Desktop App MUST 在三秒探索完成後，依目前拳擊測量項目顯示所需的 IMU 位置，並讓 user 為每個位置各自選擇一顆可用 IMU；同一顆 IMU MUST NOT 同時分配給同一項目的兩個位置。

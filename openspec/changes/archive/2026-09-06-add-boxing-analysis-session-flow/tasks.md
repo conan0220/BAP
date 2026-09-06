@@ -63,13 +63,13 @@
 - [x] 7.1 以 Fake IMU adapter 驗證兩顆無線 Nodes、兩個有線 Ports，以及混合來源都能產生一顆 IMU 一份 CSV 並共用 Session 時間基準。
 - [x] 7.2 建立 Backend integration tests，使用真正 multipart HTTP、臨時 SQLite 與 Reference Executor，涵蓋登入權限、atomic save、idempotent retry、多 Analysis Jobs 共用 CSV、狀態轉換與 Result schema。
 - [x] 7.3 建立 Qt tests，從進入單一出拳項目、三秒探索、IMU 分配、開始／結束、上傳失敗重試、分析中到 Result view，驗證按鈕、文字狀態、鍵盤操作與視窗 resize。
-- [ ] 7.4 擴充 Windows PR CI E2E，從 Candidate 安裝 Backend 與 Desktop，透過真正 `127.0.0.1:12345`、測試帳號、Fake IMU input 與 Reference Executor 驗證 Session 到 Result 完整流程。
+- [x] 7.4 擴充 Windows PR CI E2E，從 Candidate 安裝 Backend 與 Desktop，透過真正 `127.0.0.1:12345`、測試帳號、Fake IMU input 與 Reference Executor 驗證 Session 到 Result 完整流程。
 - [x] 7.5 執行完整 pytest、scenario coverage、OpenSpec strict validation、Backend migration tests 與 Windows packaging tests，修正所有 regression。
-- [ ] 7.6 使用實體有線 IMU 與同一 Gateway 下兩顆 Nodes 進行人工錄製 smoke test，確認每顆 IMU 各產生一份 CSV、rows 持續變化且同 packet 時間可以對齊；不驗證任何拳擊演算法結果。
+- [x] 7.6 使用實體有線 IMU 與同一 Gateway 下兩顆 Nodes 進行人工錄製 smoke test，確認每顆 IMU 各產生一份 CSV、rows 持續變化且同 packet 時間可以對齊；不驗證任何拳擊演算法結果。
 
 ## 8. 文件與交付
 
 - [x] 8.1 在 `docs/knowledge/` 記錄已實作的 Common IMU CSV 與 Session／Analysis 名詞和版本規則，在 `docs/guides/` 記錄開發者如何執行本機 E2E、檢查暫存 Session 及處理上傳失敗。
 - [x] 8.2 更新根目錄 README 的開發測試入口，但維持簡潔的 feature branch → PR CI → 人工 Merge 工作流程。
-- [ ] 8.3 建立包含 migration 的 Backend Candidate，於測試 Database 完成 upgrade、啟動、API smoke test 與 rollback rehearsal，確認既有帳號、登入及更新檢查仍正常。
+- [x] 8.3 建立包含 migration 的 Backend Candidate，於測試 Database 完成 upgrade、啟動、API smoke test 與 rollback rehearsal，確認既有帳號、登入及更新檢查仍正常。
 - [x] 8.4 確認 Production 未註冊實際拳擊 Executor 時，所有分析項目仍清楚顯示待開發，Reference Executor 不存在於正式設定，且不會收集無法產生真實 Result 的正式資料。
