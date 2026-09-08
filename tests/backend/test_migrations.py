@@ -24,6 +24,17 @@ def test_migrations_create_and_remove_all_current_tables(tmp_path, monkeypatch) 
         "refresh_sessions",
         "users",
     }
+    columns = {
+        item["name"]
+        for item in inspect(create_engine(f"sqlite:///{database.as_posix()}")).get_columns(
+            "measurement_sessions"
+        )
+    }
+    assert {
+        "requested_duration_seconds",
+        "actual_duration_seconds",
+        "stop_reason",
+    } <= columns
     command.downgrade(config, "base")
     assert set(inspect(create_engine(f"sqlite:///{database.as_posix()}")).get_table_names()) == {
         "alembic_version"

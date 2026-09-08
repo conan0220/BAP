@@ -131,6 +131,14 @@ class AnalysisSpecification(BaseModel):
                 raise ContractError("missing_result_field", f"缺少 Result 欄位：{name}")
             if name in result and not _matches_type(result[name], field.value_type):
                 raise ContractError("invalid_result_type", f"Result 欄位 {name} 的型別不正確")
+        if self.analysis_type == "punch_count":
+            left = result.get("left_punch_count")
+            right = result.get("right_punch_count")
+            total = result.get("total_punch_count")
+            if any(value is not None and value < 0 for value in (left, right, total)):
+                raise ContractError("invalid_result_value", "出拳次數不得小於零")
+            if left is not None and right is not None and total != left + right:
+                raise ContractError("invalid_result_value", "總拳數必須等於左右手拳數相加")
 
 
 def _matches_type(value: Any, expected: ResultValueType) -> bool:

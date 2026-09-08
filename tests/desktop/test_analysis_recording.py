@@ -6,7 +6,12 @@ from uuid import uuid4
 import pytest
 
 from anrot_imu_driver.parsers.anrot_serial_parser import AnrotFrame
-from bap_common.analysis_session import AnalysisInputBinding, AnalysisJobRequest
+from bap_common.analysis_session import (
+    AnalysisInputBinding,
+    AnalysisJobRequest,
+    CsvDescriptor,
+    SessionStopReason,
+)
 from bap_common.imu_csv import inspect_common_imu_csv
 from bap_desktop.services.analysis_recording import (
     AnalysisSessionRecorder,
@@ -14,6 +19,8 @@ from bap_desktop.services.analysis_recording import (
     LiveAnalysisRecording,
     RecordingError,
     RecordingState,
+    source_id,
+    source_descriptor,
 )
 from helpers import build_hi91_frame
 from bap_desktop.services.imu_discovery import ImuSource
@@ -142,6 +149,8 @@ def test_common_csv_rejects_no_rows(tmp_path: Path):
 @pytest.mark.scenario("common-imu-csv", "一顆 IMU 連續寫入 Frames")
 @pytest.mark.scenario("boxing-analysis-session", "user 結束測量")
 @pytest.mark.scenario("boxing-analysis-session", "user 再次開始相同項目")
+@pytest.mark.scenario("boxing-analysis-session", "user 提前結束")
+@pytest.mark.scenario("boxing-analysis-session", "Session 提前結束")
 def test_live_recording_starts_and_stops_with_new_session_ids(tmp_path: Path):
     class Connection:
         def __init__(self):
@@ -185,8 +194,129 @@ def test_live_recording_starts_and_stops_with_new_session_ids(tmp_path: Path):
     assert first_draft.metadata.csv_files[0].row_count == 2
     assert len(first_draft.metadata.analyses) == 1
     assert first_draft.metadata.analyses[0].analysis_type == "punch_count"
+    assert first_draft.metadata.metadata_schema_version == 2
+    assert first_draft.metadata.requested_duration_seconds == 60
+    assert first_draft.metadata.stop_reason is SessionStopReason.ENDED_BY_USER
     assert first_draft.session_id != second.draft.session_id
     assert all(item.closed for item in adapter.connections)
+
+
+@pytest.mark.scenario("boxing-analysis-session", "預定時間到達")
+@pytest.mark.scenario("boxing-analysis-session", "60 秒 Session 正常完成")
+def test_live_recording_uses_monotonic_duration_and_finalizes_once(tmp_path: Path):
+    class Clock:
+        value = 10.0
+
+        def __call__(self):
+            return self.value
+
+    class Connection:
+        def __init__(self):
+            self.data = build_hi91_frame() * 3
+
+        @property
+        def in_waiting(self):
+            return len(self.data)
+
+        def read(self, _size=1):
+            data, self.data = self.data, b""
+            return data
+
+        def close(self):
+            pass
+
+    class Adapter:
+        def open(self, *_args, **_kwargs):
+            return Connection()
+
+    clock = Clock()
+    recording = LiveAnalysisRecording(
+        tmp_path,
+        assignments={"left_wrist": ImuSource("COM1", ConnectionType.WIRED)},
+        analysis_type="punch_count",
+        spec_version=1,
+        desktop_version="0.1.10",
+        requested_duration_seconds=60,
+        adapter=Adapter(),
+        monotonic=clock,
+        wall_clock=lambda: 100.0 + clock.value,
+    )
+    recording.start()
+    import time
+    time.sleep(0.02)
+    clock.value = 70.0
+    assert recording.due_stop_reason(now=70.0) is SessionStopReason.DURATION_REACHED
+    draft = recording.stop(SessionStopReason.DURATION_REACHED)
+    assert recording.stop(SessionStopReason.ENDED_BY_USER) is draft
+    assert draft.metadata.stop_reason is SessionStopReason.DURATION_REACHED
+    assert draft.metadata.actual_duration_seconds == 60.0
+
+
+@pytest.mark.scenario("boxing-analysis-session", "錄製期間無線 Node 中斷")
+@pytest.mark.scenario("boxing-analysis-session", "Session 因來源中斷而結束")
+def test_live_recording_preserves_partial_wireless_data_with_source_reason(tmp_path: Path):
+    class FakeCapture:
+        def __init__(self, root, *, assignments, **_kwargs):
+            self.assignments = assignments
+            self.sources = tuple(assignments.values())
+            self.session_id = uuid4()
+            self.directory = Path(root) / str(self.session_id)
+            self.csv_ids = {source_id(source): uuid4() for source in self.sources}
+            self.started_monotonic = 10.0
+
+        def start(self):
+            self.directory.mkdir(parents=True)
+
+        def interrupted_sources(self, *, now=None):
+            return (self.sources[1],)
+
+        def stop(self):
+            from datetime import datetime, timezone
+            from bap_desktop.services.imu_capture import ImuCaptureResult
+            descriptors = []
+            for source in self.sources:
+                csv_id = self.csv_ids[source_id(source)]
+                path = self.directory / f"imu_{csv_id}.csv"
+                recorder = CommonImuCsvRecorder(path)
+                recorder.__enter__()
+                recorder.append(frame(node_id=source.node_id, gw_id=source.group_id), elapsed_us=0, packet_index=0)
+                recorder.append(frame(node_id=source.node_id, gw_id=source.group_id, timestamp=2), elapsed_us=10_000, packet_index=1)
+                inspection = recorder.finalize()
+                descriptors.append(CsvDescriptor(
+                    csv_id=csv_id,
+                    filename=path.name,
+                    source=source_descriptor(source),
+                    row_count=inspection.row_count,
+                    size_bytes=inspection.size_bytes,
+                    sha256=inspection.sha256,
+                ))
+            now = datetime.now(timezone.utc)
+            return ImuCaptureResult(
+                self.session_id, self.directory, now, now, 1.1, tuple(descriptors)
+            )
+
+        def discard(self):
+            pass
+
+    sources = {
+        "left_wrist": ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, 1, 0),
+        "right_wrist": ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, 1, 1),
+    }
+    recording = LiveAnalysisRecording(
+        tmp_path,
+        assignments=sources,
+        analysis_type="punch_count",
+        spec_version=1,
+        desktop_version="0.1.10",
+        requested_duration_seconds=60,
+        monotonic=lambda: 11.1,
+        capture_factory=FakeCapture,
+    )
+    recording.start()
+    assert recording.due_stop_reason() is SessionStopReason.SOURCE_INTERRUPTED
+    draft = recording.stop(SessionStopReason.SOURCE_INTERRUPTED)
+    assert draft.metadata.stop_reason is SessionStopReason.SOURCE_INTERRUPTED
+    assert len(draft.metadata.csv_files) == 2
 
 
 @pytest.mark.scenario("common-imu-csv", "Session 使用不同 Port 的兩顆有線 IMU")

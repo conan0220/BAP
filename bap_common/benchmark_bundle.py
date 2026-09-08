@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import json
+import zipfile
+from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .analysis_session import ImuSourceDescriptor, SHA256_PATTERN
+from .imu_csv import inspect_common_imu_csv_bytes
 
 
 BENCHMARK_SCHEMA_VERSION = 1
 BENCHMARK_ANALYSIS_TYPE = "punch_count"
 BENCHMARK_ACTIVITY_TYPE = "shadow_boxing"
 BENCHMARK_INPUT_ROLES = frozenset({"left_wrist", "right_wrist"})
+
+
+class BenchmarkBundleError(RuntimeError):
+    """A stable validation error for a self-contained Benchmark ZIP."""
 
 
 class BenchmarkStopReason(StrEnum):
@@ -118,3 +125,41 @@ class BenchmarkMetadata(BaseModel):
             sort_keys=True,
             separators=(",", ":"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedBenchmarkBundle:
+    metadata: BenchmarkMetadata
+    csv_by_role: dict[str, bytes]
+
+
+def load_benchmark_bundle(path: Path) -> LoadedBenchmarkBundle:
+    """Load and strictly verify one self-contained Benchmark ZIP."""
+
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            names = archive.namelist()
+            if len(names) != len(set(names)) or "metadata.json" not in names:
+                raise BenchmarkBundleError("Benchmark ZIP entry 不完整或重複")
+            if any(Path(name).name != name or name.startswith(("/", "\\")) for name in names):
+                raise BenchmarkBundleError("Benchmark ZIP 不得包含資料夾或絕對路徑")
+            metadata = BenchmarkMetadata.model_validate_json(archive.read("metadata.json"))
+            expected = {"metadata.json", *(item.filename for item in metadata.inputs)}
+            if set(names) != expected:
+                raise BenchmarkBundleError("Benchmark ZIP 內容與 Metadata 不一致")
+            csv_by_role: dict[str, bytes] = {}
+            for item in metadata.inputs:
+                data = archive.read(item.filename)
+                inspection = inspect_common_imu_csv_bytes(data)
+                if (
+                    inspection.row_count != item.row_count
+                    or inspection.size_bytes != item.size_bytes
+                    or inspection.sha256 != item.sha256
+                ):
+                    raise BenchmarkBundleError(f"{item.filename} checksum 或內容不正確")
+                csv_by_role[item.input_role] = data
+            return LoadedBenchmarkBundle(metadata=metadata, csv_by_role=csv_by_role)
+    except BenchmarkBundleError:
+        raise
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError) as error:
+        raise BenchmarkBundleError("Benchmark ZIP 無法通過驗證") from error

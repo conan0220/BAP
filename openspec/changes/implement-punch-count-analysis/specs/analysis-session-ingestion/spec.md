@@ -9,7 +9,7 @@
 ## ADDED Requirements
 
 ### Requirement: Backend 必須相容新版 Session duration Metadata
-Backend MUST 接受 Metadata version 2，驗證並保存 `requested_duration_seconds`、`actual_duration_seconds` 與 `stop_reason`。Database migration MUST 保留既有 Session、CSV BLOB、Analysis Job 與 Result，不得要求刪除或重建正式 Database。
+Backend MUST 接受 Metadata version 2，驗證並保存 `requested_duration_seconds`、`actual_duration_seconds` 與 `stop_reason`。支援的結束原因 MUST 包含 `duration_reached`、`ended_by_user` 與 `source_interrupted`。Database migration MUST 保留既有 Session、CSV BLOB、Analysis Job 與 Result，不得要求刪除或重建正式 Database。
 
 #### Scenario: Desktop 上傳 Metadata version 2
 - **WHEN** 已登入 user 上傳包含有效 duration 欄位與完整 CSV 的 Metadata version 2 Session
@@ -20,6 +20,11 @@ Backend MUST 接受 Metadata version 2，驗證並保存 `requested_duration_sec
 - **WHEN** Metadata version 2 缺少必要 duration 欄位、數值超出允許範圍，或 `stop_reason` 不是支援的值
 - **THEN** Backend 拒絕整個 Session package
 - **AND** 不留下部分 Session 或 CSV
+
+#### Scenario: Desktop 上傳來源中斷的部分 Session
+- **WHEN** 左右手 CSV 都已有有效資料，且 Metadata version 2 的 `stop_reason` 為 `source_interrupted`
+- **THEN** Backend 保存中斷前的完整 CSV rows 與實際錄製時間
+- **AND** Session 依既有流程建立並執行 Analysis Job
 
 #### Scenario: 既有 Metadata version 1 Session
 - **WHEN** migration 前已保存的 Metadata version 1 Session 被查詢

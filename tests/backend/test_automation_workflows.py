@@ -75,10 +75,11 @@ def test_pr_checks_desktop_version_only_for_desktop_delivery() -> None:
     assert 'gh release view "desktop-v$version"' not in check
 
 
-def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> None:
+def test_candidate_e2e_uses_production_executor_and_rehearses_migration() -> None:
     script = (ROOT / "deployment/ci/Test-BapCandidate.ps1").read_text(encoding="utf-8")
-    assert "ci_reference_backend.py" in script
-    assert 'registry.register_executor("punch_count", 1' in script
+    assert "ci_reference_backend.py" not in script
+    assert "ReferencePunchCountExecutor" not in script
+    assert '"bap_backend.app.main:app"' in script
     assert "upgrade 0002_app_release_source_tree_sha" in script
     assert "downgrade 0002_app_release_source_tree_sha" in script
     assert 'username="LegacyBoxer"' in script.replace(" ", "")

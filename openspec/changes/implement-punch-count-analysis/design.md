@@ -7,12 +7,16 @@
 | Refractory period | 確認一拳後的短暫保護時間，用來避免收拳或同一動作的其他 peaks 被重複計數。 |
 | Production Executor | Backend 正式註冊並處理 user Session 的分析元件，不是只供 CI 使用的替代實作。 |
 | Benchmark case | 一次具有左右手 CSV、完整性資訊與人工 Ground Truth 的固定測試資料。 |
+| Benchmark ZIP | Benchmark Recorder 匯出的自包含壓縮檔，內含 `metadata.json` 與兩份 Common IMU CSV。 |
+| source_interrupted | 錄製期間必要的無線 IMU Node 連續一秒沒有有效 Frame，系統因此提早停止 Session。 |
 
 ## 背景
 
 動機與範圍請參閱 `proposal.md`，可驗證行為請參閱本 Change 的 capability specs。
 
 目前前後端已共同註冊 `punch_count` version 1 規格，Input Roles 是 `left_wrist` 與 `right_wrist`，Result 已固定為三個整數拳數欄位；Production Backend 尚未註冊真正 Executor。Desktop 已能自動探索 IMU、錄製每顆 IMU 各一份 Common IMU CSV、上傳 Session 並等待 Result，但頁面目前沒有預定錄製時間。
+
+前一個 Change 已完成 Benchmark Recorder、`BenchmarkMetadata`、ZIP 載入與驗證邏輯，Repository 也已有五份經人工核對的無線 IMU Benchmark ZIP。本 Change 會重用這些資料與契約，不再建立第二套 Manifest 格式。
 
 `elapsed_us` 由 Desktop 的 `time.perf_counter()` 相對 Session 起點計算。同一次 serial read 解析出的多個 Frames 可能共用相同 `elapsed_us`；無線 Gateway Frames 另有 `device_time_ms`。演算法不能假設每一列都有唯一 host timestamp。
 
@@ -22,8 +26,8 @@
 
 - 以可解釋且決定性的 Rule-based pipeline 計算左右手 Shadow boxing 出拳次數。
 - 重用既有 Analysis Specification、Session upload、SQLite BLOB 與 Job dispatcher。
-- 讓時間到與 user 提前結束共用同一個安全的錄製完成流程。
-- 將真實 labeled CSV 固定成 source-level pytest regression suite。
+- 讓時間到、user 提前結束與必要 IMU Node 中斷共用同一個安全的錄製完成流程。
+- 將既有五份真實 labeled Benchmark ZIP 固定成 source-level pytest regression suite。
 - 對無效資料回報安全錯誤，不以零拳掩蓋資料問題。
 
 **非目標：**
@@ -100,15 +104,17 @@ stateDiagram-v2
 
 不只計算 acceleration peaks，因為 Shadow boxing 的伸拳、末端減速與收拳可能在同一拳內產生多個 peaks。
 
-### 4. 門檻由 labeled Sessions 校正並隨演算法版本保存
+### 4. 門檻由既有 labeled Sessions 校正並隨演算法版本保存
 
 第一版參數會集中在單一不可由一般 user 任意修改的 `rule_v1` configuration，包含 smoothing window、baseline window、start／confirm／end thresholds、episode duration 與 refractory period。
 
-參數先由 labeled Sessions 校正，再以未拿來挑選門檻的 Benchmark cases 驗證。修改規則或門檻必須讓所有已核准 fixtures 重跑；若未來需要破壞既有語意，新增 Analysis Specification version，而不是偷偷改變 Result 契約。
+第一版 Prototype 先使用目前五份 labeled Benchmark ZIP 校正參數，也用同一批資料做固定回歸測試。修改規則或門檻必須讓所有已核准 fixtures 重跑；若未來需要破壞既有語意，新增 Analysis Specification version，而不是偷偷改變 Result 契約。
+
+因為校正與回歸使用同一批資料，測試通過只能證明「演算法能正確處理這五個已知案例」，不能宣稱對未知 user 或未知動作具有獨立、無偏的準確率。未來取得更多資料後，才把未參與調參的 Sessions 分成獨立驗證集。
 
 第一版避免新增 NumPy／SciPy dependency，使用標準 Python 的串流 CSV、數學與有限大小 rolling buffers，降低 Backend Artifact 大小與部署風險。若資料顯示需要較進階 filter，再另行評估 dependency。
 
-### 5. Benchmark 使用自包含 case 與嚴格 Ground Truth 比對
+### 5. 直接重用自包含 Benchmark ZIP
 
 Repository 結構規劃為：
 
@@ -116,24 +122,25 @@ Repository 結構規劃為：
 tests/
   fixtures/
     punch_count/
-      benchmark_v1/
-        manifest.json
-        <case-id>/
-          left_wrist.csv
-          right_wrist.csv
+      README.md
+      bap-punch-count-benchmark-*.zip
   backend/
     test_punch_count_benchmark.py
 ```
 
-Manifest 為每個 case 記錄固定 ID、兩份檔案、SHA-256、左右手與總拳數。Loader 會先驗證 schema、checksum 與 Ground Truth，再呼叫 Production Executor。每個 case 的左、右與總拳數都必須完全相符；失敗訊息包含 case ID、expected 與 actual。
+每份 ZIP 已經透過 `metadata.json` 記錄固定 ID、兩份檔案、SHA-256、左右手與總拳數，不需要額外建立跨檔案的 `manifest.json`。既有純 ZIP Loader 與 `BenchmarkMetadata` 會移到或整理到 `bap_common`，讓 Desktop 匯出功能、Backend 演算法測試與 CI 共用同一份契約。
+
+Loader 會先驗證 ZIP 安全性、schema、checksum 與 Ground Truth，再呼叫 Production Executor。每個 case 的左、右與總拳數都必須完全相符；失敗訊息包含 case ID、expected 與 actual。測試不得修改 ZIP、CSV 或 Ground Truth。
 
 提供的資料只含 Session-level counts 時，只能驗證 count error，不能計算 event Precision／Recall。若未來加入每拳 timestamp labels，可以新增 event-level metrics，但不影響本次三欄 Result。
 
-### 6. 錄製倒數使用 monotonic clock 並集中 finalization
+### 6. 所有停止原因共用 monotonic clock 與集中 finalization
 
 出拳次數頁面新增整數秒輸入與倒數顯示。開始錄製時同時保存 planned duration、wall-clock start 與 monotonic start；UI timer 每次更新都從 monotonic elapsed 重新計算，不用累加 timer ticks，避免 UI 忙碌造成倒數漂移。
 
-自動時間到與「提前結束測量」都呼叫同一個 guarded stop operation。第一個呼叫將狀態從 `recording` 切到 `finalizing`，後續競爭呼叫直接返回，確保 CSV 只關閉及上傳一次。
+自動時間到、「提前結束測量」與必要無線 IMU Node 中斷都呼叫同一個 guarded stop operation。第一個呼叫將狀態從 `recording` 切到 `finalizing`，後續競爭呼叫直接返回，確保 CSV 只關閉及上傳一次。
+
+必要無線 Node 連續一秒沒有有效 Frame 時，Desktop 停止整個 Session 並使用 `source_interrupted`。若左右手在中斷前都已有至少一筆有效資料，系統保留並上傳部分 Session，讓 Backend 照常分析；若任一 Input Role 完全沒有有效資料，Session 顯示失敗且不送出空資料。
 
 Metadata schema 升為 version 2，新增：
 
@@ -141,7 +148,7 @@ Metadata schema 升為 version 2，新增：
 {
   "requested_duration_seconds": 60,
   "actual_duration_seconds": 47.3,
-  "stop_reason": "ended_by_user"
+  "stop_reason": "source_interrupted"
 }
 ```
 
@@ -165,21 +172,23 @@ Desktop 仍先驗證 Backend capability 為 executable，並只在 Job status �
 - **[伸拳與收拳可能被算成兩拳]** → 使用狀態機、Hysteresis 與 refractory period，並加入快速連拳及單次完整動作 cases。
 - **[過長 refractory period 會漏掉快速 double jab]** → 用真實快速連拳 Session 校正並保留版本化設定。
 - **[不同 user、安裝方向與力度造成訊號差異]** → 使用方向不敏感特徵，Benchmark 納入不同速度與左右手資料；不宣稱超出已驗證資料範圍的準確度。
+- **[同一批五個案例同時用來調參與回歸，可能過度貼合已知資料]** → 明確把第一版結論限制為「五個已知案例通過」；有更多資料後建立不參與調參的獨立驗證集。
 - **[只有每個 Session 的總拳數可能掩蓋一個 false positive 與一個 false negative]** → 第一版明確限制驗證結論；後續增加逐拳 timestamp Ground Truth。
 - **[Metadata migration 影響既有正式 Database]** → 新欄位允許 null、先備份、執行 Alembic migration，再以舊版 rows 與新版 upload 做相容測試。
 
 ## 遷移計畫
 
 1. 新增 Metadata version 2 model 與向後相容 Database migration，保留 version 1 讀取。
-2. 新增 Session duration UI、monotonic countdown 與單次 finalization guard。
+2. 新增 Session duration UI、monotonic countdown、必要 Node 中斷偵測與單次 finalization guard。
 3. 新增純演算法核心與 Production Executor，先以人工小型 fixtures 驗證資料錯誤處理。
-4. 匯入 user 提供的 labeled Shadow boxing Sessions，驗證 checksums 並建立 Benchmark manifest。
-5. 以一部分 Sessions 校正 `rule_v1`，再讓固定 Benchmark cases 通過。
+4. 將既有 Benchmark ZIP Loader 整理到 `bap_common`，並直接使用 Repository 內五份已核對的 ZIP，不建立第二套 Manifest。
+5. 以五份既有案例校正 `rule_v1` 並建立固定回歸；記錄這不是獨立準確率驗證。
 6. 在 source-level、API integration 與 Artifact E2E 中驗證完整 Session 到 Result 流程。
 7. 依現有 CI/CD 先部署 Backend；Production Health 通過後再發布包含新 UI 的 Desktop 版本。
 
 Rollback 時可將 Backend `current` 切回上一個 Release。新增的 nullable Database columns 保留但不妨礙舊程式執行；Desktop 仍會依 Backend capability 判斷是否開放正式出拳次數。
 
-## 待確認問題
+## 已知限制
 
-- user 提供的第一批 labeled Sessions 數量、錄製長度、參與者差異與快速連拳涵蓋範圍，將決定第一版能被合理宣稱的驗證範圍。
+- 第一版只有五份既有 labeled Benchmark ZIP，而且同時用於調參與回歸，因此只能保證這五個案例，不代表對其他 user 或動作的準確率。
+- 目前 Ground Truth 只有 Session-level 左右手拳數，不能驗證每一拳發生時間或計算 event-level Precision／Recall。

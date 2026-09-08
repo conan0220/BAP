@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from threading import Thread
 from typing import Callable, Iterable
 from uuid import UUID, uuid4
@@ -23,11 +23,12 @@ from bap_common.analysis_session import (
     CsvDescriptor,
     ImuSourceDescriptor,
     SessionMetadata,
+    SessionStopReason,
     SourceConnectionType,
 )
 from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv, write_header
 from bap_desktop.services.imu_discovery import ImuSource
-from bap_desktop.services.imu_capture import ImuCaptureError, LiveImuCapture
+from bap_desktop.services.imu_capture import CaptureDuration, ImuCaptureError, LiveImuCapture
 from bap_desktop.services.imu_scan import (
     DEFAULT_BAUD_RATE,
     ConnectionType,
@@ -332,12 +333,14 @@ class LiveAnalysisRecording:
         analysis_type: str,
         spec_version: int,
         desktop_version: str,
+        requested_duration_seconds: int = 60,
         adapter: PortAdapter | None = None,
         monotonic: Callable[[], float] = time.perf_counter,
         wall_clock: Callable[[], float] = time.time,
+        capture_factory=LiveImuCapture,
     ) -> None:
         try:
-            self.capture = LiveImuCapture(
+            self.capture = capture_factory(
                 root,
                 assignments=assignments,
                 adapter=adapter,
@@ -347,6 +350,8 @@ class LiveAnalysisRecording:
         except ImuCaptureError as error:
             raise RecordingError(str(error)) from error
         self.desktop_version = desktop_version
+        self.duration = CaptureDuration(requested_duration_seconds)
+        self.monotonic = monotonic
         self.assignments = dict(assignments)
         self.sources = self.capture.sources
         self.csv_ids = self.capture.csv_ids
@@ -359,6 +364,7 @@ class LiveAnalysisRecording:
             },
         )
         self.draft = SessionDraft(self.capture.session_id, self.capture.directory)
+        self._finalization_lock = Lock()
 
     def start(self) -> None:
         self.draft.begin()
@@ -370,29 +376,53 @@ class LiveAnalysisRecording:
             self.draft.close()
             raise
 
-    def stop(self) -> SessionDraft:
-        if self.draft.state is RecordingState.FINALIZED:
-            return self.draft
-        if self.draft.state is not RecordingState.RECORDING:
-            raise RecordingError("Session 目前不在錄製中")
-        try:
-            result = self.capture.stop()
-            metadata = SessionMetadata(
-                session_id=self.draft.session_id,
-                desktop_version=self.desktop_version,
-                started_at=result.started_at,
-                ended_at=result.ended_at,
-                csv_files=result.descriptors,
-                analyses=(self.job,),
-            )
-            (self.draft.directory / "metadata.json").write_text(
-                metadata.canonical_json(), encoding="utf-8"
-            )
-            self.draft.finalize(metadata)
-            return self.draft
-        except BaseException:
-            self.abort()
-            raise
+    def elapsed_seconds(self, *, now: float | None = None) -> float:
+        current = self.monotonic() if now is None else now
+        return self.duration.elapsed(self.capture.started_monotonic, current)
+
+    def remaining_seconds(self, *, now: float | None = None) -> float:
+        current = self.monotonic() if now is None else now
+        return self.duration.remaining(self.capture.started_monotonic, current)
+
+    def due_stop_reason(self, *, now: float | None = None) -> SessionStopReason | None:
+        current = self.monotonic() if now is None else now
+        if self.capture.interrupted_sources(now=current):
+            return SessionStopReason.SOURCE_INTERRUPTED
+        if self.duration.reached(self.capture.started_monotonic, current):
+            return SessionStopReason.DURATION_REACHED
+        return None
+
+    def stop(
+        self,
+        reason: SessionStopReason = SessionStopReason.ENDED_BY_USER,
+    ) -> SessionDraft:
+        with self._finalization_lock:
+            if self.draft.state is RecordingState.FINALIZED:
+                return self.draft
+            if self.draft.state is not RecordingState.RECORDING:
+                raise RecordingError("Session 目前不在錄製中")
+            try:
+                result = self.capture.stop()
+                metadata = SessionMetadata(
+                    session_id=self.draft.session_id,
+                    metadata_schema_version=2,
+                    desktop_version=self.desktop_version,
+                    started_at=result.started_at,
+                    ended_at=result.ended_at,
+                    requested_duration_seconds=self.duration.requested_seconds,
+                    actual_duration_seconds=result.actual_duration_seconds,
+                    stop_reason=reason,
+                    csv_files=result.descriptors,
+                    analyses=(self.job,),
+                )
+                (self.draft.directory / "metadata.json").write_text(
+                    metadata.canonical_json(), encoding="utf-8"
+                )
+                self.draft.finalize(metadata)
+                return self.draft
+            except BaseException:
+                self.abort()
+                raise
 
     def abort(self) -> None:
         self.capture.discard()

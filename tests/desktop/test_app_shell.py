@@ -218,7 +218,12 @@ def test_successful_restore_opens_authenticated_home(qtbot) -> None:
     assert window.stack.currentWidget() is window.app_shell
     assert window.app_shell.content_stack.currentWidget() is window.home_page
     assert tuple(window.home_page.punch_buttons) == text.PUNCH_ITEMS
-    assert all(text.PENDING in button.text() for button in window.home_page.punch_buttons.values())
+    assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
+    assert all(
+        text.PENDING in button.text()
+        for name, button in window.home_page.punch_buttons.items()
+        if name != "出拳次數"
+    )
 
 
 @pytest.mark.scenario("desktop-app-shell", "登入後進入主畫面")

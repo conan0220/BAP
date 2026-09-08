@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
@@ -21,6 +22,7 @@ from bap_desktop.resources import text
 from bap_desktop.services.imu_discovery import DiscoveryResult, ImuDiscoveryService, ImuSource
 from bap_desktop.services.analysis_flow import AnalysisFlowService
 from bap_desktop.services.analysis_recording import LiveAnalysisRecording, RecordingError, SessionDraft
+from bap_common.analysis_session import SessionStopReason
 from bap_desktop.ui.components import Card, PageHeader
 from bap_desktop.ui.punch_items.definitions import ImuPlacement, get_punch_item_definition
 
@@ -78,6 +80,7 @@ class PunchItemPage(QWidget):
         super().__init__(parent)
         self.item_name = item_name
         self.definition = get_punch_item_definition(item_name)
+        self._is_available_item = self.definition.analysis_type == "punch_count"
         self.service = service or ImuDiscoveryService()
         self.analysis_flow = analysis_flow
         self.recording_root = recording_root
@@ -101,8 +104,8 @@ class PunchItemPage(QWidget):
         self.layout.setContentsMargins(28, 26, 28, 28)
         self.layout.setSpacing(16)
         header = PageHeader(item_name, "系統會先自動確認所有 Port，再依照這個項目的需求分配 IMU。")
-        self.analysis_chip = QLabel("分析功能待開發")
-        self.analysis_chip.setObjectName("pendingChip")
+        self.analysis_chip = QLabel("可使用" if self._is_available_item else "分析功能待開發")
+        self.analysis_chip.setObjectName("statusChip" if self._is_available_item else "pendingChip")
         header.add_action(self.analysis_chip)
         self.layout.addWidget(header)
 
@@ -124,10 +127,25 @@ class PunchItemPage(QWidget):
         self.sources_layout = QVBoxLayout(self.sources_container)
         self.sources_layout.setContentsMargins(0, 0, 0, 0)
         self.sources_layout.setSpacing(10)
+        self.duration_row = QWidget()
+        duration_layout = QHBoxLayout(self.duration_row)
+        duration_layout.setContentsMargins(0, 0, 0, 0)
+        duration_label = QLabel("錄製時間（秒）")
+        self.duration_input = QLineEdit("60")
+        self.duration_input.setAccessibleName("Session 錄製時間（秒）")
+        self.duration_input.setPlaceholderText("5～3600")
+        duration_label.setBuddy(self.duration_input)
+        duration_layout.addWidget(duration_label)
+        duration_layout.addWidget(self.duration_input)
+        duration_layout.addStretch(1)
+        self.duration_row.setVisible(False)
+        self.timer_details = QLabel("")
+        self.timer_details.setProperty("muted", True)
+        self.timer_details.setVisible(False)
         self.continue_button = QPushButton("繼續")
         self.continue_button.setProperty("role", "primary")
         self.continue_button.setEnabled(False)
-        self.continue_button.setAccessibleName("繼續到目前項目的待開發頁面")
+        self.continue_button.setAccessibleName("繼續設定目前的拳擊分析項目")
         self.retry_button = QPushButton(text.DISCOVERY_RETRY)
         self.retry_button.setProperty("role", "secondary")
         self.retry_button.setVisible(False)
@@ -135,7 +153,14 @@ class PunchItemPage(QWidget):
         actions.addWidget(self.retry_button)
         actions.addStretch(1)
         actions.addWidget(self.continue_button)
-        for widget in (self.status, self.progress, self.message, self.sources_container):
+        for widget in (
+            self.status,
+            self.progress,
+            self.message,
+            self.sources_container,
+            self.duration_row,
+            self.timer_details,
+        ):
             card_layout.addWidget(widget)
         card_layout.addLayout(actions)
         self.layout.addWidget(self.card)
@@ -147,7 +172,7 @@ class PunchItemPage(QWidget):
         self._start_timer.setSingleShot(True)
         self._start_timer.timeout.connect(self.start_discovery)
         self._elapsed_timer = QTimer(self)
-        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.setInterval(100)
         self._elapsed_timer.timeout.connect(self._update_elapsed)
 
     def showEvent(self, event) -> None:
@@ -166,6 +191,7 @@ class PunchItemPage(QWidget):
         self.assignments.clear()
         self._measurement_state = "assigning"
         self.continue_button.setText("繼續")
+        self.analysis_chip.setText("可使用" if self._is_available_item else "分析功能待開發")
         self._latest_sources = ()
         self._clear_source_selectors()
         self.message.clear()
@@ -339,13 +365,19 @@ class PunchItemPage(QWidget):
         self.continue_button.setText("開始測量")
         self.continue_button.setEnabled(True)
         self.retry_button.setVisible(False)
+        self.duration_row.setVisible(True)
+        self.timer_details.setVisible(False)
         self.service.clear()
 
     def _show_unavailable(self) -> None:
         self._clear_source_selectors()
         self.message.setVisible(False)
-        self.status.setText(f"{self.item_name}：{text.PENDING}")
-        self.analysis_chip.setText("分析功能待開發")
+        if self._is_available_item:
+            self.status.setText("Backend 目前沒有提供出拳次數分析，請確認 Backend 版本與連線狀態。")
+            self.analysis_chip.setText("目前無法使用")
+        else:
+            self.status.setText(f"{self.item_name}：{text.PENDING}")
+            self.analysis_chip.setText("分析功能待開發")
         self.continue_button.setEnabled(False)
         self.retry_button.setVisible(False)
         self.service.clear()
@@ -355,12 +387,24 @@ class PunchItemPage(QWidget):
             self._show_error("本機 Session 暫存位置尚未設定")
             return
         try:
+            raw_duration = self.duration_input.text().strip()
+            if not raw_duration or not raw_duration.isdecimal():
+                raise ValueError
+            requested_duration = int(raw_duration)
+            if not 5 <= requested_duration <= 3600:
+                raise ValueError
+        except ValueError:
+            self.status.setText("錄製時間必須是 5～3600 之間的整數秒。")
+            self.duration_input.setFocus()
+            return
+        try:
             self._recording = self.recording_factory(
                 self.recording_root,
                 assignments=self.assignments,
                 analysis_type=self.definition.analysis_type,
                 spec_version=1,
                 desktop_version=self.desktop_version,
+                requested_duration_seconds=requested_duration,
             )
             self._recording.start()
         except Exception:
@@ -368,25 +412,55 @@ class PunchItemPage(QWidget):
             return
         self._measurement_state = "recording"
         self._elapsed_seconds = 0
-        self.status.setText("測量中｜00:00")
-        self.continue_button.setText("結束測量")
+        self.status.setText("測量中")
+        self.duration_input.setEnabled(False)
+        self.timer_details.setVisible(True)
+        self._update_elapsed()
+        self.continue_button.setText("提前結束測量")
         self.continue_button.setEnabled(True)
         self._elapsed_timer.start()
 
     def _update_elapsed(self) -> None:
-        self._elapsed_seconds += 1
-        minutes, seconds = divmod(self._elapsed_seconds, 60)
-        self.status.setText(f"測量中｜{minutes:02d}:{seconds:02d}")
+        recording = self._recording
+        if recording is None or self._measurement_state != "recording":
+            return
+        if hasattr(recording, "elapsed_seconds"):
+            elapsed = float(recording.elapsed_seconds())
+            remaining = float(recording.remaining_seconds())
+        else:
+            self._elapsed_seconds += 1
+            elapsed = float(self._elapsed_seconds)
+            remaining = max(0.0, int(self.duration_input.text() or "60") - elapsed)
+        elapsed_minutes, elapsed_seconds = divmod(int(elapsed), 60)
+        remaining_minutes, remaining_seconds = divmod(int(remaining + 0.999), 60)
+        self.timer_details.setText(
+            f"已錄製 {elapsed_minutes:02d}:{elapsed_seconds:02d}｜"
+            f"剩餘 {remaining_minutes:02d}:{remaining_seconds:02d}"
+        )
+        if hasattr(recording, "due_stop_reason"):
+            reason = recording.due_stop_reason()
+            if reason is not None:
+                self._finish_measurement(reason)
 
-    def _finish_measurement(self) -> None:
+    def _finish_measurement(
+        self,
+        reason: SessionStopReason = SessionStopReason.ENDED_BY_USER,
+    ) -> None:
+        if self._measurement_state != "recording":
+            return
+        self._measurement_state = "finalizing"
         self._elapsed_timer.stop()
         self.continue_button.setEnabled(False)
-        self.status.setText("正在完成 CSV…")
+        self.status.setText(
+            "IMU 來源中斷，正在保留中斷前資料…"
+            if reason is SessionStopReason.SOURCE_INTERRUPTED
+            else "正在完成 CSV…"
+        )
         recording = self._recording
         if recording is None:
             self._show_error("找不到目前的錄製工作")
             return
-        worker = _FlowWorker(recording.stop)
+        worker = _FlowWorker(lambda: recording.stop(reason))
         worker.signals.finished.connect(self._recording_finished)
         worker.signals.failed.connect(self._recording_failed)
         QThreadPool.globalInstance().start(worker)
@@ -401,6 +475,7 @@ class PunchItemPage(QWidget):
         self._measurement_state = "failed"
         self.status.setText("IMU 錄製失敗，本次資料無法使用，請返回後重新測量。")
         self.continue_button.setEnabled(False)
+        self.duration_input.setEnabled(True)
 
     def _upload_and_wait(self) -> None:
         if self.analysis_flow is None or self._draft is None or self._draft.metadata is None:
@@ -459,9 +534,16 @@ class PunchItemPage(QWidget):
             return
         self._measurement_state = "completed"
         self.status.setText(f"分析完成｜Session {validated.session_id or self._draft.session_id}")
+        self.analysis_chip.setText("分析完成")
         self._clear_source_selectors()
-        for key, value in validated.result.items():
-            label = QLabel(f"{key}：{value}")
+        labels = (
+            ("總出拳次數", "total_punch_count"),
+            ("左手", "left_punch_count"),
+            ("右手", "right_punch_count"),
+        )
+        for display_name, key in labels:
+            value = validated.result[key]
+            label = QLabel(f"{display_name}：{value}")
             label.setWordWrap(True)
             self.sources_layout.addWidget(label)
 

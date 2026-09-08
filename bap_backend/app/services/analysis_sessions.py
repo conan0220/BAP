@@ -30,7 +30,7 @@ class AnalysisSessionService:
             metadata = SessionMetadata.model_validate_json(metadata_json)
         except ValidationError as error:
             raise _bad_request("invalid_session_metadata", "Session Metadata 格式不正確") from error
-        if metadata.metadata_schema_version != 1:
+        if metadata.metadata_schema_version not in {1, 2}:
             raise _bad_request("unsupported_metadata_schema", "不支援的 Metadata schema version")
         if metadata.imu_csv_schema_version != 1:
             raise _bad_request("unsupported_csv_schema", "不支援的 Common IMU CSV schema version")
