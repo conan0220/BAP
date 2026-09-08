@@ -11,6 +11,8 @@
 | Public API URL | Desktop App 呼叫遠端後端時使用的公開 HTTPS 網址：`https://imuapp.lab2312.cs.nthu.edu.tw/api/`。 |
 | 拳種辨識 | 根據量測資料辨識出拳種類的分析項目；舊介面曾稱為「拳型辨識」。 |
 | 項目頁面 | user 從主畫面或側邊導覽選擇單一拳擊測量項目後看到的頁面。 |
+| 開發工具 | 與正式拳擊分析分開、用來建立或檢查開發資料的 Desktop App 功能區。 |
+| Benchmark 資料錄製 | 建立本機 labeled IMU 測試資料的頁面。 |
 
 ## Purpose
 
@@ -103,3 +105,17 @@ Desktop App MUST 使用 `https://imuapp.lab2312.cs.nthu.edu.tw/api/` 呼叫帳�
 - **WHEN** Desktop App 傳送註冊、登入、Token 或更新資訊 request
 - **THEN** request 使用 `https://imuapp.lab2312.cs.nthu.edu.tw/api/` 作為公開 API base URL
 - **AND** Desktop App 不直接連線到 `0.0.0.0:12345`
+
+### Requirement: App shell 必須提供獨立的 Benchmark 開發工具入口
+Desktop App MUST 在登入後的 App shell 提供「開發工具」區域與「Benchmark 資料錄製」入口。該入口 MUST 與正式拳擊分析項目分開呈現，並 MUST 以文字說明匯出的資料需由開發者人工審查後才能成為正式 Benchmark。
+
+#### Scenario: user 查看側邊導覽
+- **WHEN** user 已登入並查看 App shell
+- **THEN** 側邊導覽顯示「開發工具」區域
+- **AND** 該區域包含「Benchmark 資料錄製」入口
+- **AND** 入口不會被列為第六種拳擊分析項目
+
+#### Scenario: user 開啟 Benchmark Recorder
+- **WHEN** user 選擇「Benchmark 資料錄製」
+- **THEN** 內容區顯示 Recorder 頁面
+- **AND** App shell 的目前頁面名稱與導覽狀態同步更新
