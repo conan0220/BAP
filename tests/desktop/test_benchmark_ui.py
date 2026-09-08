@@ -63,6 +63,19 @@ def test_page_explains_local_only_manual_ground_truth_and_keyboard_fields(qtbot,
     assert page.left_selector.accessibleName() == "左手腕 IMU"
     assert page.right_selector.accessibleName() == "右手腕 IMU"
     assert page.duration.minimum() == 5 and page.duration.maximum() == 3600 and page.duration.value() == 60
+    assert page.analysis_selector.accessibleName() == "Benchmark 錄製項目"
+    assert [page.analysis_selector.itemText(index) for index in range(page.analysis_selector.count())] == ["出拳次數"]
+
+
+def test_page_keeps_only_supported_benchmark_item_and_locks_it_during_recording(qtbot, tmp_path: Path) -> None:
+    page = make_page(qtbot, tmp_path)
+    page.left_selector.setCurrentIndex(1)
+    page.right_selector.setCurrentIndex(2)
+
+    page._primary_action()
+
+    assert page.analysis_selector.currentData() == "punch_count"
+    assert not page.analysis_selector.isEnabled()
 
 
 def test_page_requires_two_distinct_sources_and_completes_label_flow(qtbot, tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 | 名詞 | 定義 |
 |---|---|
 | Benchmark 資料錄製 | Desktop App 在本機擷取 IMU、加入 Ground Truth 並匯出測試資料的流程。 |
+| Benchmark 項目 | 這次錄製要提供資料的拳擊分析功能；目前只支援「出拳次數」。 |
 | Benchmark bundle | 包含一份 Metadata JSON 與每顆 IMU 各一份 Common IMU CSV 的 ZIP。 |
 | Ground Truth | user 在錄製完成後輸入的左右手實際出拳次數。 |
 | Input Role | 某顆 IMU 在資料中的用途；第一版為 `left_wrist` 與 `right_wrist`。 |
@@ -10,18 +11,24 @@
 
 ## Purpose
 
-提供一個不依賴 Backend 的 Desktop App 開發工具，讓 user 能可靠地錄製左右手腕 Shadow boxing IMU、輸入人工拳數，並匯出可加入演算法開發與 CI 測試的 labeled Benchmark bundle。
+提供一個不依賴 Backend 的 Desktop App 開發工具，讓 user 能建立「出拳次數」Benchmark，可靠地錄製左右手腕 Shadow boxing IMU、輸入人工拳數，並匯出可加入演算法開發與 CI 測試的 labeled Benchmark bundle。
 
 ## Requirements
 
-### Requirement: 第一版 Recorder 必須建立 punch_count Shadow boxing 資料
-Benchmark 資料錄製頁面 MUST 在第一版固定使用 `punch_count`、`shadow_boxing`、`left_wrist` 與 `right_wrist`。系統 MUST 清楚顯示這是建立開發與測試資料的工具，不得將它表示為正式 Backend 分析結果。
+### Requirement: Recorder 目前只提供出拳次數 Benchmark 項目
+Benchmark 資料錄製頁面 MUST 顯示目前唯一支援的「出拳次數」項目，並固定使用 `punch_count`、`shadow_boxing`、`left_wrist` 與 `right_wrist`。在出拳速度的 Ground Truth 尚未定義前，頁面 MUST NOT 提供「出拳速度」Benchmark 項目。系統 MUST 清楚顯示這是建立開發與測試資料的工具，不得將它表示為正式 Backend 分析結果。
 
 #### Scenario: user 進入 Benchmark 資料錄製
 - **WHEN** 已登入 user 從「開發工具」開啟 Benchmark 資料錄製
-- **THEN** 畫面顯示資料用途為出拳次數及 Shadow boxing
+- **THEN** 畫面只提供「出拳次數」Benchmark 項目
+- **AND** 畫面顯示活動類型為 Shadow boxing
 - **AND** 畫面要求分配左手腕與右手腕 IMU
 - **AND** 畫面說明錄製完成後仍需輸入人工拳數
+
+#### Scenario: 出拳速度沒有 Ground Truth
+- **WHEN** 出拳速度的參考量測方式與 Ground Truth schema 尚未決定
+- **THEN** Benchmark 項目中不顯示「出拳速度」
+- **AND** 系統不得把左右手拳數當成出拳速度 Ground Truth
 
 ### Requirement: Recorder 必須自動探索並驗證兩顆 IMU
 進入頁面後，系統 MUST 依既有 IMU source discovery 規則自動掃描所有候選 Port。user MUST 能將不同的有效來源分別指定給左手腕與右手腕；無線來源 MUST 顯示 Port、Group ID 與 Node ID，有線來源 MUST 顯示 Port。
