@@ -41,6 +41,13 @@ def test_metadata_accepts_fixed_contract_and_computes_total() -> None:
     assert {item.input_role for item in metadata.inputs} == {"left_wrist", "right_wrist"}
 
 
+def test_metadata_accepts_source_interrupted_stop_reason() -> None:
+    payload = valid_payload()
+    payload["stop_reason"] = BenchmarkStopReason.SOURCE_INTERRUPTED
+    metadata = BenchmarkMetadata(**payload)
+    assert metadata.stop_reason is BenchmarkStopReason.SOURCE_INTERRUPTED
+
+
 @pytest.mark.parametrize("left,right", [(-1, 0), (0, -1), (1.5, 0), ("x", 0)])
 def test_ground_truth_rejects_invalid_counts(left, right) -> None:
     with pytest.raises((ValidationError, ValueError)):

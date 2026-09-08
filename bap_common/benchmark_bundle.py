@@ -22,6 +22,7 @@ BENCHMARK_INPUT_ROLES = frozenset({"left_wrist", "right_wrist"})
 class BenchmarkStopReason(StrEnum):
     DURATION_REACHED = "duration_reached"
     ENDED_BY_USER = "ended_by_user"
+    SOURCE_INTERRUPTED = "source_interrupted"
 
 
 class BenchmarkGroundTruth(BaseModel):

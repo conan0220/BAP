@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from bap_common.benchmark_bundle import BenchmarkStopReason
 from bap_desktop.services.benchmark_recorder import (
     BenchmarkRecorderCoordinator, BenchmarkRecorderError, BenchmarkRecorderState,
     benchmark_bundle_filename, export_benchmark_bundle,
@@ -186,7 +187,11 @@ class BenchmarkRecorderPage(QWidget):
         self._show_labeling()
 
     def _show_labeling(self) -> None:
-        self._record_timer.stop(); self.label_card.setVisible(True); self.status.setText("錄製完成。請人工確認並填入左右手實際出拳次數。")
+        self._record_timer.stop(); self.label_card.setVisible(True)
+        if self.coordinator is not None and self.coordinator.stop_reason is BenchmarkStopReason.SOURCE_INTERRUPTED:
+            self.status.setText("偵測到 IMU 中斷，已停止錄製並保留中斷前的資料。請確認 Ground Truth 後匯出。")
+        else:
+            self.status.setText("錄製完成。請人工確認並填入左右手實際出拳次數。")
         self.primary_button.setText("匯出 Benchmark"); self.primary_button.setEnabled(False); self.left_count.setFocus()
 
     @Slot()
@@ -221,8 +226,8 @@ class BenchmarkRecorderPage(QWidget):
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save,
         )
-        if choice is QMessageBox.StandardButton.Save: return self._export()
-        if choice is QMessageBox.StandardButton.Discard:
+        if choice == QMessageBox.StandardButton.Save: return self._export()
+        if choice == QMessageBox.StandardButton.Discard:
             self.coordinator.discard(); return True
         return False
 
