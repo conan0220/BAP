@@ -82,7 +82,7 @@ stateDiagram-v2
     [*] --> Scanning
     Scanning --> Ready: 找到並分配兩個來源
     Ready --> Recording: user 開始
-    Recording --> Labeling: 時間到或提前結束
+    Recording --> Labeling: 時間到、提前結束或來源中斷
     Recording --> Failed: 來源或寫檔失敗
     Labeling --> ReadyToExport: Ground Truth 有效
     ReadyToExport --> Exported: ZIP 驗證成功
@@ -91,7 +91,7 @@ stateDiagram-v2
     ReadyToExport --> Discarded: user 確認捨棄
 ```
 
-Page controller 只允許目前 state 對應的主要操作。自動 stop 與提前 stop 共用 single-finalization guard。離開頁面或關閉 App 時，`Labeling` 與 `ReadyToExport` 必須先提示匯出或捨棄。
+Page controller 只允許目前 state 對應的主要操作。自動 stop、提前 stop 與來源中斷 stop 共用 single-finalization guard。錄製中若任一必要無線 Node 連續一秒沒有有效 Frame，系統以 `source_interrupted` 結束，保留中斷前資料並進入 `Labeling`。只有完全沒有有效 Frame、Serial read error 或寫檔失敗才進入 `Failed`。離開頁面或關閉 App 時，`Labeling` 與 `ReadyToExport` 必須先提示匯出或捨棄。
 
 ### 4. Benchmark Metadata 使用獨立 version 1 schema
 

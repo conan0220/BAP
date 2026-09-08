@@ -53,6 +53,21 @@ class Adapter:
         return self.by_port[port]
 
 
+class Clock:
+    def __init__(self, value: float = 0.0) -> None:
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+
+def wait_until_connection_is_consumed(connection: Connection) -> None:
+    deadline = time.monotonic() + 1.0
+    while connection.data and time.monotonic() < deadline:
+        time.sleep(0.002)
+    assert not connection.data
+
+
 def test_capture_duration_is_bounded_and_uses_monotonic_values() -> None:
     assert CaptureDuration().requested_seconds == 60
     duration = CaptureDuration(5)
@@ -82,6 +97,29 @@ def test_live_capture_writes_one_csv_per_wireless_node(tmp_path: Path) -> None:
     assert {item.source.node_id for item in result.descriptors} == {1, 2}
     assert {item.source.group_id for item in result.descriptors} == {7}
     assert all(inspect_common_imu_csv(result.directory / item.filename).row_count == 1 for item in result.descriptors)
+
+
+@pytest.mark.scenario("benchmark-data-recorder", "錄製期間無線 Node 中斷")
+def test_live_capture_reports_only_the_wireless_node_that_stopped_sending_frames(tmp_path: Path) -> None:
+    clock = Clock()
+    connection = Connection(build_gateway_frame(gateway_id=7, nodes=(build_gateway_node(1), build_gateway_node(2))))
+    left = ImuSource("COM3", ConnectionType.WIRELESS_RECEIVER, 7, 1)
+    right = ImuSource("COM3", ConnectionType.WIRELESS_RECEIVER, 7, 2)
+    capture = LiveImuCapture(
+        tmp_path,
+        assignments={"left_wrist": left, "right_wrist": right},
+        adapter=Adapter({"COM3": connection}),
+        monotonic=clock,
+    )
+    capture.start()
+    wait_until_connection_is_consumed(connection)
+    clock.value = 0.6
+    connection.data = build_gateway_frame(gateway_id=7, nodes=(build_gateway_node(1),))
+    wait_until_connection_is_consumed(connection)
+
+    assert capture.interrupted_sources(now=1.1) == (right,)
+    result = capture.stop()
+    assert sorted(item.row_count for item in result.descriptors) == [1, 2]
 
 
 @pytest.mark.scenario("benchmark-data-recorder", "使用兩顆有線 IMU")
@@ -118,6 +156,7 @@ class FakeCapture:
         self.directory = Path(root) / str(self.session_id)
         self.started_monotonic = 10.0
         self.stop_calls = 0
+        self.interrupted = ()
 
     def start(self):
         self.directory.mkdir(parents=True)
@@ -126,6 +165,9 @@ class FakeCapture:
         self.stop_calls += 1
         descriptors = tuple(make_csv(self.directory, role, source) for role, source in self.assignments.items())
         return ImuCaptureResult(self.session_id, self.directory, datetime.now(timezone.utc), datetime.now(timezone.utc), 5.0, descriptors)
+
+    def interrupted_sources(self, *, now=None):
+        return self.interrupted
 
     def discard(self):
         pass
@@ -178,6 +220,20 @@ def test_early_stop_and_invalid_ground_truth(tmp_path: Path) -> None:
         with pytest.raises(BenchmarkRecorderError):
             coordinator.set_ground_truth(left, right)
     assert coordinator.state is BenchmarkRecorderState.LABELING
+
+
+@pytest.mark.scenario("benchmark-data-recorder", "錄製期間無線 Node 中斷")
+def test_coordinator_stops_and_keeps_partial_data_for_export_after_interruption(tmp_path: Path) -> None:
+    coordinator = ready_coordinator(tmp_path)
+    coordinator.start(60)
+    coordinator.capture.interrupted = (coordinator.assignments["right_wrist"],)
+
+    assert coordinator.tick(now=12.0)
+    assert coordinator.state is BenchmarkRecorderState.LABELING
+    assert coordinator.stop_reason is BenchmarkStopReason.SOURCE_INTERRUPTED
+    assert coordinator.capture.stop_calls == 1
+    coordinator.set_ground_truth("0", "0", notes="錄製期間 IMU 中斷")
+    assert coordinator.metadata().stop_reason is BenchmarkStopReason.SOURCE_INTERRUPTED
 
 
 @pytest.mark.scenario("benchmark-data-recorder", "同一來源被重複指定")

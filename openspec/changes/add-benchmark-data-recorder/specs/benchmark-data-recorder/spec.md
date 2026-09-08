@@ -56,10 +56,18 @@ user MUST 在開始前指定 5 至 3600 之間的整數秒數，預設為 60 秒
 - **AND** Metadata 保存實際錄製時間
 - **AND** 結束原因為 `ended_by_user`
 
-#### Scenario: 錄製期間任一必要來源失敗
-- **WHEN** 左手腕或右手腕來源中斷、解析失敗或沒有產生有效 Frame
+#### Scenario: 錄製期間無線 Node 中斷
+- **WHEN** 左手腕或右手腕的無線 Node 連續一秒沒有產生有效 Frame
+- **THEN** 系統自動停止本次錄製
+- **AND** 保留中斷前已成功寫入的左右手資料
+- **AND** Metadata 的結束原因為 `source_interrupted`
+- **AND** UI 說明 IMU 已中斷及資料已保留
+- **AND** user 完成人工 Ground Truth 後仍可匯出 Benchmark bundle
+
+#### Scenario: 來源完全沒有有效資料或讀取失敗
+- **WHEN** 任一必要來源完全沒有產生有效 Frame、Serial read 發生錯誤或 CSV 無法完成寫入
 - **THEN** 系統將本次錄製標示為失敗
-- **AND** 不得讓 user 把不完整資料匯出成有效 Benchmark bundle
+- **AND** 不得讓 user 把無法驗證的資料匯出成有效 Benchmark bundle
 
 ### Requirement: 匯出前必須取得並驗證 Ground Truth
 錄製成功後，系統 MUST 要求 user 分別輸入大於或等於零的左手與右手實際出拳次數，並 MUST 自動計算總拳數。Ground Truth 不完整或格式錯誤時 MUST 禁止匯出。

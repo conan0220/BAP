@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtWidgets import QMessageBox
 
 from bap_desktop.resources import text
+from bap_desktop.services.benchmark_recorder import BenchmarkRecorderState
 from bap_desktop.services.imu_discovery import DiscoveryResult
 from bap_desktop.services.shutdown import ShutdownCoordinator
 from bap_desktop.ui.main_window import MainWindow
@@ -261,6 +263,32 @@ def test_only_one_punch_item_page_is_open_at_a_time(qtbot) -> None:
     assert window.stack.count() == 2
     assert window.app_shell.content_stack.count() == 2
     assert services[0].clears >= 1
+
+
+@pytest.mark.scenario("benchmark-data-recorder", "user 捨棄尚未匯出的錄製並離開頁面")
+def test_discarding_unsaved_benchmark_navigates_to_home(qtbot, tmp_path, monkeypatch) -> None:
+    session = _FakeSession(restore_result=True)
+    window = MainWindow(
+        session,
+        benchmark_recordings_dir=tmp_path,
+    )  # type: ignore[arg-type]
+    qtbot.addWidget(window)
+    window.show_benchmark_recorder()
+    page = window._feature_page
+    assert page is not None
+    page.coordinator.capture_result = SimpleNamespace(directory=tmp_path)
+    page.coordinator.state = BenchmarkRecorderState.LABELING
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: int(QMessageBox.StandardButton.Discard),
+    )
+
+    window.show_home()
+
+    assert window._feature_page is None
+    assert window.app_shell.content_stack.currentWidget() is window.home_page
+    assert page.coordinator.state is BenchmarkRecorderState.DISCARDED
 
 
 def test_window_close_invalidates_current_device_result_and_session(qtbot) -> None:

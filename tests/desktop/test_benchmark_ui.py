@@ -8,6 +8,7 @@ import pytest
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from bap_common.benchmark_bundle import BenchmarkStopReason
 from bap_desktop.services.benchmark_recorder import BenchmarkRecorderState
 from bap_desktop.services.imu_discovery import DiscoveryResult, ImuSource
 from bap_desktop.services.imu_scan import ConnectionType
@@ -25,7 +26,7 @@ class Coordinator:
     def __init__(self, _root, *, desktop_version):
         self.desktop_version = desktop_version; self.state = BenchmarkRecorderState.SCANNING
         self.has_unsaved_recording = False; self.capture_result = SimpleNamespace(directory=Path("staging")); self.assignments = {}
-        self.discarded = False; self.exported = None
+        self.discarded = False; self.exported = None; self.stop_reason = None
     def begin_scan(self): self.state = BenchmarkRecorderState.SCANNING
     def complete_scan(self, result): self.sources = result.sources; self.state = BenchmarkRecorderState.READY
     def set_assignments(self, assignments): self.assignments = assignments
@@ -33,7 +34,7 @@ class Coordinator:
     def elapsed_seconds(self): return 1.2
     def remaining_seconds(self): return 58.8
     def tick(self): return False
-    def stop_early(self): self.state = BenchmarkRecorderState.LABELING; self.has_unsaved_recording = True
+    def stop_early(self): self.state = BenchmarkRecorderState.LABELING; self.has_unsaved_recording = True; self.stop_reason = BenchmarkStopReason.ENDED_BY_USER
     def set_ground_truth(self, left, right, *, notes=""):
         if not left or not right:
             from bap_desktop.services.benchmark_recorder import BenchmarkRecorderError
@@ -82,6 +83,17 @@ def test_page_requires_two_distinct_sources_and_completes_label_flow(qtbot, tmp_
     assert "Ground Truth" in page.label_card.findChild(type(page.status)).text()
 
 
+def test_page_explains_that_interrupted_source_data_was_kept(qtbot, tmp_path: Path) -> None:
+    page = make_page(qtbot, tmp_path)
+    page.coordinator.stop_reason = BenchmarkStopReason.SOURCE_INTERRUPTED
+
+    page._show_labeling()
+
+    assert "IMU 中斷" in page.status.text()
+    assert "保留中斷前的資料" in page.status.text()
+    assert page.primary_button.text() == "匯出 Benchmark"
+
+
 @pytest.mark.scenario("benchmark-data-recorder", "user 取消儲存對話框")
 def test_cancelled_save_keeps_unsaved_recording(qtbot, tmp_path: Path, monkeypatch) -> None:
     page = make_page(qtbot, tmp_path); page.left_selector.setCurrentIndex(1); page.right_selector.setCurrentIndex(2)
@@ -97,9 +109,26 @@ def test_close_prompt_can_cancel_or_discard_unsaved_recording(qtbot, tmp_path: P
     page = make_page(qtbot, tmp_path); page.coordinator.has_unsaved_recording = True; page.coordinator.state = BenchmarkRecorderState.LABELING
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Cancel)
     assert not page.can_close()
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Discard)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: int(QMessageBox.StandardButton.Discard))
     assert page.can_close()
     assert page.coordinator.discarded
+
+
+@pytest.mark.scenario("benchmark-data-recorder", "user 離開前選擇匯出尚未保存的錄製")
+def test_close_prompt_accepts_save_button_value(qtbot, tmp_path: Path, monkeypatch) -> None:
+    page = make_page(qtbot, tmp_path)
+    page.coordinator.has_unsaved_recording = True
+    page.coordinator.state = BenchmarkRecorderState.LABELING
+    export_calls = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: int(QMessageBox.StandardButton.Save),
+    )
+    monkeypatch.setattr(page, "_export", lambda: export_calls.append(True) or True)
+
+    assert page.can_close()
+    assert export_calls == [True]
 
 @pytest.mark.scenario("benchmark-data-recorder", "user 查看側邊導覽")
 @pytest.mark.scenario("benchmark-data-recorder", "user 開啟 Benchmark Recorder")

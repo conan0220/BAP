@@ -21,6 +21,9 @@ class ImuCaptureError(RuntimeError):
     pass
 
 
+SOURCE_INTERRUPTION_TIMEOUT_SECONDS = 1.0
+
+
 @dataclass(frozen=True, slots=True)
 class CaptureDuration:
     requested_seconds: int = 60
@@ -91,6 +94,7 @@ class LiveImuCapture:
         self._result: ImuCaptureResult | None = None
         self._started_monotonic = 0.0
         self._started_epoch = 0.0
+        self._last_frame_monotonic: dict[str, float] = {}
 
     @staticmethod
     def _source_id(source: ImuSource) -> str:
@@ -118,6 +122,10 @@ class LiveImuCapture:
             self._state = "recording"
         self._started_monotonic = self.monotonic()
         self._started_epoch = self.wall_clock()
+        self._last_frame_monotonic = {
+            self._source_id(source): self._started_monotonic
+            for source in self.sources
+        }
         try:
             for source in self.sources:
                 csv_id = self.csv_ids[self._source_id(source)]
@@ -145,7 +153,8 @@ class LiveImuCapture:
                     time.sleep(0.002)
                     continue
                 frames = parser.parse(connection.read(available))
-                elapsed_us = round(max(0.0, self.monotonic() - self._started_monotonic) * 1_000_000)
+                observed_at = self.monotonic()
+                elapsed_us = round(max(0.0, observed_at - self._started_monotonic) * 1_000_000)
                 for frame in frames:
                     for source in self.sources:
                         if source.port != port:
@@ -162,13 +171,37 @@ class LiveImuCapture:
                             if key not in packet_numbers:
                                 packet_numbers[key] = len(packet_numbers)
                             packet_index = packet_numbers[key]
-                        self._recorders[self._source_id(source)].append(
+                        identity = self._source_id(source)
+                        self._recorders[identity].append(
                             frame, elapsed_us=elapsed_us, packet_index=packet_index
                         )
+                        with self._lock:
+                            self._last_frame_monotonic[identity] = observed_at
         except BaseException as error:
             if not self._stop.is_set():
                 self._errors.append(error)
             self._stop.set()
+
+    def interrupted_sources(
+        self,
+        *,
+        now: float | None = None,
+        timeout_seconds: float = SOURCE_INTERRUPTION_TIMEOUT_SECONDS,
+    ) -> tuple[ImuSource, ...]:
+        """Return required sources that have stopped producing frames long enough."""
+        if timeout_seconds <= 0:
+            raise ValueError("IMU 中斷判斷時間必須大於零")
+        current = self.monotonic() if now is None else now
+        with self._lock:
+            if self._state != "recording":
+                return ()
+            last_seen = dict(self._last_frame_monotonic)
+        return tuple(
+            source
+            for source in self.sources
+            if current - last_seen.get(self._source_id(source), self._started_monotonic)
+            >= timeout_seconds
+        )
 
     def stop(self) -> ImuCaptureResult:
         with self._lock:

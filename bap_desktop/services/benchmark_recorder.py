@@ -130,6 +130,10 @@ class BenchmarkRecorderCoordinator:
         if self.state is not BenchmarkRecorderState.RECORDING or self.capture is None:
             return False
         current = self.monotonic() if now is None else now
+        interrupted_sources = getattr(self.capture, "interrupted_sources", None)
+        if callable(interrupted_sources) and interrupted_sources(now=current):
+            self._finish(BenchmarkStopReason.SOURCE_INTERRUPTED)
+            return True
         if self.duration.reached(self.capture.started_monotonic, current):
             self._finish(BenchmarkStopReason.DURATION_REACHED)
             return True
