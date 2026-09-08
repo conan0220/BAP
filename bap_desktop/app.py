@@ -110,6 +110,43 @@ def _run_api_e2e_command(result_path: Path | None) -> int:
     return exit_code
 
 
+def _wait_for_api_e2e_analysis(
+    analysis,
+    session_id: str,
+    analysis_id: str,
+    access_token: str,
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.25,
+    monotonic=None,
+    sleep=None,
+) -> dict:
+    """Wait for the asynchronous CI reference analysis to reach a terminal state."""
+
+    import time
+
+    monotonic = monotonic or time.monotonic
+    sleep = sleep or time.sleep
+    deadline = monotonic() + timeout_seconds
+    last_status = "unknown"
+    while True:
+        result = analysis.analysis_status(session_id, analysis_id, access_token)
+        last_status = str(result.get("status", "unknown"))
+        if last_status == "completed":
+            return result
+        if last_status == "failed":
+            code = result.get("error_code") or "analysis_failed"
+            message = result.get("safe_error_message") or "Backend analysis failed"
+            raise RuntimeError(f"Backend analysis failed ({code}): {message}")
+        if last_status not in {"pending", "processing"}:
+            raise RuntimeError(f"Backend returned an unexpected analysis status: {last_status}")
+        if monotonic() >= deadline:
+            raise RuntimeError(
+                f"Timed out after {timeout_seconds:g} seconds waiting for analysis; "
+                f"last status: {last_status}"
+            )
+        sleep(poll_interval_seconds)
+
 def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
     """Exercise the packaged clients against a real CI Backend over HTTP."""
 
@@ -220,11 +257,14 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
         report("upload_session")
         accepted = analysis.upload(root, metadata, tokens.access_token)
         report("analysis_status")
-        result = analysis.analysis_status(
-            accepted["session_id"], accepted["analysis_ids"][0], tokens.access_token
+        result = _wait_for_api_e2e_analysis(
+            analysis,
+            accepted["session_id"],
+            accepted["analysis_ids"][0],
+            tokens.access_token,
         )
-        if result.get("status") != "completed" or result.get("result", {}).get("total_punch_count") != 2:
-            raise RuntimeError("installed Desktop Session-to-Result E2E did not complete")
+        if result.get("result", {}).get("total_punch_count") != 2:
+            raise RuntimeError("installed Desktop Session-to-Result E2E returned an unexpected Result")
     report("refresh_token")
     refreshed = auth.refresh(tokens.refresh_token)
     report("logout")
