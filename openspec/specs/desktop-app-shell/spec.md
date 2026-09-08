@@ -6,13 +6,14 @@
 | Desktop App | 安裝在 user 電腦上的 BAP 桌面應用程式。 |
 | 主畫面 | user 登入後看到的第一個功能頁面。 |
 | 拳擊測量項目 | 出拳次數、出拳速度、出拳力量、出拳軌跡及拳種辨識。 |
-| 待開發 | 畫面入口與前置設定已存在，但本次不會錄製拳擊資料或產生分析結果。 |
+| 待開發 | 畫面可保留入口，但不能錄製正式資料或顯示假分析結果。 |
 | Windows 安裝版本 | user 不需要先安裝 Python，就能在支援的 Windows 電腦安裝及啟動的應用程式版本。 |
 | Public API URL | Desktop App 呼叫遠端後端時使用的公開 HTTPS 網址：`https://imuapp.lab2312.cs.nthu.edu.tw/api/`。 |
 | 拳種辨識 | 根據量測資料辨識出拳種類的分析項目；舊介面曾稱為「拳型辨識」。 |
 | 項目頁面 | user 從主畫面或側邊導覽選擇單一拳擊測量項目後看到的頁面。 |
 | 開發工具 | 與正式拳擊分析分開、用來建立或檢查開發資料的 Desktop App 功能區。 |
 | Benchmark 資料錄製 | 建立本機 labeled IMU 測試資料的頁面。 |
+| 可使用 | user 可以完成 IMU 分配、錄製、上傳並取得真實 Backend Result。 |
 
 ## Purpose
 
@@ -30,8 +31,11 @@ flowchart TD
     HOME --> FORCE[出拳力量]
     HOME --> PATH[出拳軌跡]
     HOME --> TYPE[拳種辨識]
-    COUNT & SPEED & FORCE & PATH & TYPE --> DISCOVERY[自動探索 IMU 來源]
-    DISCOVERY --> PENDING[顯示待開發]
+    COUNT --> COUNT_DISCOVERY[自動探索並分配 IMU]
+    COUNT_DISCOVERY --> RECORD[錄製 Session]
+    RECORD --> BACKEND[Backend 分析]
+    BACKEND --> RESULT[顯示出拳次數 Result]
+    SPEED & FORCE & PATH & TYPE --> PENDING[顯示待開發]
 ```
 
 ## Requirements
@@ -59,12 +63,13 @@ Desktop App MUST 在 user 完成登入或成功恢復登入狀態後顯示主畫
 - **AND** Desktop App 顯示主畫面
 
 ### Requirement: 拳擊測量項目分開呈現
-Desktop App MUST 將出拳次數、出拳速度、出拳力量、出拳軌跡及拳種辨識分成五個獨立入口，不得提供同時選擇兩個以上項目的量測流程；所有 user 可見位置 MUST 使用「拳種辨識」，不得再顯示「拳型辨識」。
+Desktop App MUST 將出拳次數、出拳速度、出拳力量、出拳軌跡及拳種辨識分成五個獨立入口，不得提供同時選擇兩個以上項目的量測流程；所有 user 可見位置 MUST 使用「拳種辨識」，不得再顯示「拳型辨識」。出拳次數 MUST 顯示為可使用；其他尚未提供 Production Executor 的項目 MUST 顯示為待開發。
 
 #### Scenario: 查看拳擊測量項目
 - **WHEN** user 查看主畫面或拳擊測量導覽
 - **THEN** Desktop App 分別顯示五個拳擊測量項目
-- **AND** 每個項目都標示「待開發」
+- **AND** 出拳次數顯示為可使用
+- **AND** 出拳速度、出拳力量、出拳軌跡與拳種辨識顯示為待開發
 - **AND** 第五個項目顯示為「拳種辨識」
 
 #### Scenario: 進入單一拳擊項目
@@ -72,16 +77,19 @@ Desktop App MUST 將出拳次數、出拳速度、出拳力量、出拳軌跡及
 - **THEN** Desktop App 只為該項目啟動 IMU 來源探索流程
 - **AND** Desktop App 不要求 user 同時選擇其他拳擊測量項目
 - **AND** 項目頁面標題與 user 所選的項目一致
-
 ### Requirement: 待開發項目不得假裝已有分析功能
-Desktop App MUST 在完成 IMU 來源選擇後顯示該拳擊測量項目仍待開發，且不得開始拳擊資料錄製、產生分析數值或顯示假結果。
+Desktop App MUST 在 user 選擇尚未提供 Production Executor 的拳擊測量項目後顯示該項目仍待開發，且不得開始正式拳擊資料錄製、產生分析數值或顯示假結果。已提供 Production Executor 的出拳次數不受此限制。
 
-#### Scenario: 完成 IMU 來源選擇
-- **WHEN** user 為一個拳擊測量項目選好 IMU 來源
+#### Scenario: 完成待開發項目的 IMU 來源選擇
+- **WHEN** user 為出拳速度、出拳力量、出拳軌跡或拳種辨識選好 IMU 來源
 - **THEN** Desktop App 顯示該項目「待開發」
-- **AND** Desktop App 不開始拳擊資料錄製
-- **AND** Desktop App 不顯示力量、速度、次數、軌跡或拳種結果
+- **AND** Desktop App 不開始正式拳擊資料錄製
+- **AND** Desktop App 不顯示力量、速度、軌跡或拳種結果
 
+#### Scenario: 出拳次數 Executor 可用
+- **WHEN** user 進入出拳次數並且 Backend 回報 `punch_count` version 1 可執行
+- **THEN** Desktop App 允許 user 完成該項目的正式測量流程
+- **AND** Desktop App 只顯示 Backend 實際回傳且通過契約驗證的拳數 Result
 ### Requirement: 介面使用白話繁體中文
 Desktop App MUST 以繁體中文及容易理解的文字呈現主要操作、狀態與錯誤；Port、Baud rate、Group ID、Node ID 等專有名詞可以保留英文。
 

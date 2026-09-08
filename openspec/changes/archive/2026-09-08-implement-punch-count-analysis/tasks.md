@@ -50,10 +50,11 @@
 - [x] 6.2 更新出拳次數 Result view，顯示總拳數、左手拳數與右手拳數，並測試只接受 Backend completed 且符合契約的 Result。
 - [x] 6.3 以臨時 SQLite 與真實 HTTP 執行 Session duration、左右手 CSV upload、Production Executor、Job polling 與 Result 的 API integration test，並包含可分析的 `source_interrupted` 部分 Session。
 - [x] 6.4 更新 packaged Desktop API E2E，使安裝後 App 對解壓後 Backend 完成真正的 `punch_count` Session flow，實際呼叫 Production Executor，不再依賴固定假拳數。
+- [x] 6.5 分析完成後顯示「重新測量」，隱藏上一個 Session 的錄製控制；按下後清除 Result 與 Session 狀態，自動重新檢測 Port 並回到 IMU 分配階段。
 
 ## 7. 驗證與交付
 
 - [x] 7.1 執行完整 pytest，確認既有帳號、IMU、Session、部署、更新與 CI/CD contract tests 沒有回歸。
-- [ ] 7.2 執行 Windows Candidate Build 與 Artifact E2E，驗證 Backend ZIP、Desktop Installer、Migration、真實 HTTP 與 cleanup。
-- [ ] 7.3 使用兩顆實體無線 IMU 完成人工 Shadow boxing 測試，確認自動到時、提前結束、必要 Node 中斷後的部分資料處理、上傳、分析與 Result 顯示。
-- [ ] 7.4 在提交 Desktop 程式修改前提升 `bap_desktop/VERSION`，並由 Pull Request CI 驗證版本與 Candidate。
+- [x] 7.2 執行 Windows Candidate Build 與 Artifact E2E，驗證 Backend ZIP、Desktop Installer、Migration、真實 HTTP 與 cleanup。
+- [x] 7.3 使用兩顆實體無線 IMU 完成人工 Shadow boxing 測試，確認自動到時、提前結束、必要 Node 中斷後的部分資料處理、上傳、分析與 Result 顯示。
+- [x] 7.4 在提交 Desktop 程式修改前提升 `bap_desktop/VERSION`，並由 Pull Request CI 驗證版本與 Candidate。
