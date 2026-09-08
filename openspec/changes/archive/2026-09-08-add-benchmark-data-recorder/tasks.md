@@ -44,8 +44,8 @@
 ## 6. 驗證與交付
 
 - [x] 6.1 執行完整 pytest 與 Benchmark bundle contract tests，確認正式 Session upload 與既有 IMU 連線狀態沒有回歸。
-- [x] 6.2 使用同一 Gateway 的兩個實體 Nodes 完成人工錄製、提前結束、Ground Truth 與 ZIP 匯出驗證。人工驗證資料保存在 `docs/validation/add-benchmark-data-recorder/`，不作為演算法 Benchmark。
+- [x] 6.2 使用同一 Gateway 的兩個實體 Nodes 完成人工錄製、提前結束、Ground Truth 與 ZIP 匯出驗證。兩份臨時人工驗證 ZIP 已依專案決策移除，不作為演算法 Benchmark。
 - [x] 6.3 依專案決策，第一批真實 Benchmark 全部使用無線 IMU，不執行實體有線 IMU 驗證；既有 Fake wired 自動測試繼續保留。
 - [x] 6.4 在錄製期間中斷一個實體無線 Node；系統連續一秒收不到該 Node 的有效 Frame 時自動停止錄製、保留中斷前資料，並允許 user 完成 Ground Truth 後匯出。完全沒有有效資料或讀取失敗仍禁止匯出。
 - [x] 6.5 將五份人工匯出的無線 IMU ZIP 用 Benchmark loader 驗證，並把經開發者審查的 cases 加入 `tests/fixtures/punch_count/`。
-- [ ] 6.6 在提交 Desktop 程式修改前提升 `bap_desktop/VERSION`，再執行 Windows Candidate Build、Installer smoke test 與 Pull Request CI。
+- [x] 6.6 在提交 Desktop 程式修改前提升 `bap_desktop/VERSION`，再執行 Windows Candidate Build、Installer smoke test 與 Pull Request CI。
