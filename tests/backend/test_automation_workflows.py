@@ -85,6 +85,10 @@ def test_candidate_e2e_injects_reference_executor_and_rehearses_migration() -> N
     assert "Existing account did not survive migration rehearsal" in script
     assert "Existing update metadata did not survive migration rehearsal" in script
     assert 'throw "Installed Desktop Candidate E2E failed."' not in script
+    assert "$BackendProcess.WaitForExit(10000)" in script
+    assert "for ($Attempt = 1; $Attempt -le 20; $Attempt++)" in script
+    assert "Start-Sleep -Milliseconds 500" in script
+    assert "Unable to remove the Candidate E2E Database after waiting 10 seconds" in script
 
     smoke = (ROOT / "packaging/windows/Smoke-Test-BapInstaller.ps1").read_text(encoding="utf-8")
     assert 'Arguments @("--api-e2e-test", "--api-e2e-result-file", $ApiE2EResult)' in smoke
