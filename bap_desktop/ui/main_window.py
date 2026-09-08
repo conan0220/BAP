@@ -22,6 +22,7 @@ from bap_desktop.services.update import (
     consume_latest_update_outcome,
 )
 from bap_desktop.ui.auth import AuthPage
+from bap_desktop.ui.benchmark import BenchmarkRecorderPage
 from bap_desktop.ui.app_shell import AppShell
 from bap_desktop.ui.home import HomePage
 from bap_desktop.ui.imu_diagnostics import ImuDiagnosticsPage
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         discovery_service_factory: Callable[[], ImuDiscoveryService] = ImuDiscoveryService,
         analysis_flow: AnalysisFlowService | None = None,
         measurement_sessions_dir=None,
+        benchmark_recordings_dir=None,
         desktop_version: str = "0.0.0",
         update_service: UpdateService | None = None,
         update_installer: UpdateInstaller | None = None,
@@ -95,6 +97,7 @@ class MainWindow(QMainWindow):
         self.discovery_service_factory = discovery_service_factory
         self.analysis_flow = analysis_flow
         self.measurement_sessions_dir = measurement_sessions_dir
+        self.benchmark_recordings_dir = benchmark_recordings_dir
         self.desktop_version = desktop_version
         self.update_service = update_service
         self.update_installer = update_installer
@@ -104,6 +107,7 @@ class MainWindow(QMainWindow):
         self._install_worker: _InstallWorker | None = None
         self._feature_wrapper: QWidget | None = None
         self._feature_page: QWidget | None = None
+        self._feature_key: str | None = None
 
         apply_bap_style(QApplication.instance())
         self.stack = QStackedWidget()
@@ -129,6 +133,7 @@ class MainWindow(QMainWindow):
         self.app_shell.home_requested.connect(self.show_home)
         self.app_shell.diagnostics_requested.connect(self.show_diagnostics)
         self.app_shell.punch_item_requested.connect(self.show_punch_item)
+        self.app_shell.benchmark_requested.connect(self.show_benchmark_recorder)
         self.app_shell.logout_requested.connect(self.logout)
         self.update_banner.install_requested.connect(self._start_update_install)
         self.shutdown_coordinator.register(self.session.close)
@@ -198,7 +203,8 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def show_home(self) -> None:
-        self._discard_feature_page()
+        if not self._discard_feature_page():
+            return
         username = self.auth_page.login_username.text().strip() or None
         self.app_shell.set_account_name(username)
         self.app_shell.show_home()
@@ -229,24 +235,47 @@ class MainWindow(QMainWindow):
         )
 
     @Slot()
+    def show_benchmark_recorder(self) -> None:
+        self._show_feature(
+            BenchmarkRecorderPage(
+                service=self.discovery_service_factory(),
+                recording_root=self.benchmark_recordings_dir,
+                desktop_version=self.desktop_version,
+            ),
+            key="benchmark-recorder",
+            title="Benchmark 資料錄製",
+        )
+
+    @Slot()
     def logout(self) -> None:
-        self._discard_feature_page()
+        if not self._discard_feature_page():
+            return
         self.session.logout()
         self.stack.setCurrentWidget(self.auth_page)
 
     def _show_feature(self, page: QWidget, *, key: str, title: str) -> None:
-        self._discard_feature_page()
+        if not self._discard_feature_page():
+            page.deleteLater()
+            return
         self._feature_wrapper = page
         self._feature_page = page
+        self._feature_key = key
         shutdown = getattr(page, "shutdown", None)
         if callable(shutdown):
             self.shutdown_coordinator.register(shutdown)
         self.app_shell.set_feature(page, key=key, title=title)
         self.stack.setCurrentWidget(self.app_shell)
 
-    def _discard_feature_page(self) -> None:
+    def _discard_feature_page(self) -> bool:
         page = self._feature_page
         if page is not None:
+            can_close = getattr(page, "can_close", None)
+            if callable(can_close) and not can_close():
+                if self._feature_key is not None:
+                    current = self.app_shell.nav_buttons.get(self._feature_key)
+                    if current is not None:
+                        current.setChecked(True)
+                return False
             shutdown = getattr(page, "shutdown", None)
             if callable(shutdown):
                 shutdown()
@@ -256,10 +285,15 @@ class MainWindow(QMainWindow):
             removed.deleteLater()
         self._feature_page = None
         self._feature_wrapper = None
+        self._feature_key = None
+        return True
 
     def shutdown(self) -> None:
         self.shutdown_coordinator.shutdown()
 
     def closeEvent(self, event) -> None:
+        if not self._discard_feature_page():
+            event.ignore()
+            return
         self.shutdown()
         super().closeEvent(event)

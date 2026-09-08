@@ -27,6 +27,7 @@ from bap_common.analysis_session import (
 )
 from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv, write_header
 from bap_desktop.services.imu_discovery import ImuSource
+from bap_desktop.services.imu_capture import ImuCaptureError, LiveImuCapture
 from bap_desktop.services.imu_scan import (
     DEFAULT_BAUD_RATE,
     ConnectionType,
@@ -321,7 +322,7 @@ def build_analysis_request(
 
 
 class LiveAnalysisRecording:
-    """User-controlled recording: start now and stop only when requested."""
+    """Formal Session wrapper around the reusable live IMU capture primitive."""
 
     def __init__(
         self,
@@ -335,122 +336,53 @@ class LiveAnalysisRecording:
         monotonic: Callable[[], float] = time.perf_counter,
         wall_clock: Callable[[], float] = time.time,
     ) -> None:
-        if not assignments:
-            raise RecordingError("至少要分配一顆 IMU")
-        if len(set(assignments.values())) != len(assignments):
-            raise RecordingError("同一顆 IMU 不得分配給多個 Input Roles")
-        self.adapter = adapter or PySerialPortAdapter()
-        self.monotonic = monotonic
-        self.wall_clock = wall_clock
+        try:
+            self.capture = LiveImuCapture(
+                root,
+                assignments=assignments,
+                adapter=adapter,
+                monotonic=monotonic,
+                wall_clock=wall_clock,
+            )
+        except ImuCaptureError as error:
+            raise RecordingError(str(error)) from error
         self.desktop_version = desktop_version
         self.assignments = dict(assignments)
-        self.sources = tuple(dict.fromkeys(assignments.values()))
-        self.csv_ids = {source_id(source): uuid4() for source in self.sources}
+        self.sources = self.capture.sources
+        self.csv_ids = self.capture.csv_ids
         self.job = build_analysis_request(
             analysis_type=analysis_type,
             spec_version=spec_version,
-            role_sources={role: self.csv_ids[source_id(source)] for role, source in assignments.items()},
+            role_sources={
+                role: self.csv_ids[source_id(source)]
+                for role, source in assignments.items()
+            },
         )
-        session_id = uuid4()
-        self.draft = SessionDraft(session_id, Path(root) / str(session_id))
-        self._recorders: dict[str, CommonImuCsvRecorder] = {}
-        self._connections = {}
-        self._threads: list[Thread] = []
-        self._stop = Event()
-        self._errors: list[BaseException] = []
-        self._started_monotonic = 0.0
-        self._started_epoch = 0.0
+        self.draft = SessionDraft(self.capture.session_id, self.capture.directory)
 
     def start(self) -> None:
-        self.draft.directory.mkdir(parents=True, exist_ok=False)
         self.draft.begin()
-        self._started_monotonic = self.monotonic()
-        self._started_epoch = self.wall_clock()
         try:
-            for source in self.sources:
-                csv_id = self.csv_ids[source_id(source)]
-                recorder = CommonImuCsvRecorder(self.draft.directory / f"imu_{csv_id}.csv")
-                recorder.__enter__()
-                self._recorders[source_id(source)] = recorder
-            for port in sorted({source.port for source in self.sources}):
-                connection = self.adapter.open(port, baud_rate=DEFAULT_BAUD_RATE, timeout=0.05)
-                self._connections[port] = connection
-                thread = Thread(target=self._read_port, args=(port, connection), daemon=True)
-                self._threads.append(thread)
-                thread.start()
+            self.capture.start()
         except BaseException:
-            self.abort()
+            self.draft.fail()
+            self.capture.discard()
+            self.draft.close()
             raise
 
-    def _read_port(self, port: str, connection) -> None:
-        parser = AnrotSerialParser()
-        packet_numbers: dict[int, int] = {}
-        wired_packet_index = 0
-        try:
-            while not self._stop.is_set():
-                available = max(0, int(connection.in_waiting))
-                if available == 0:
-                    time.sleep(0.002)
-                    continue
-                frames = parser.parse(connection.read(available))
-                elapsed_us = round(max(0.0, self.monotonic() - self._started_monotonic) * 1_000_000)
-                for frame in frames:
-                    for source in self.sources:
-                        if source.port != port:
-                            continue
-                        if source.connection_type is ConnectionType.WIRED:
-                            if frame.frame_type == 0x63:
-                                continue
-                            packet_index = wired_packet_index
-                            wired_packet_index += 1
-                        else:
-                            if frame.gw_id != source.group_id or frame.node_id != source.node_id:
-                                continue
-                            key = int(frame.gw_ts_ms or elapsed_us)
-                            if key not in packet_numbers:
-                                packet_numbers[key] = len(packet_numbers)
-                            packet_index = packet_numbers[key]
-                        self._recorders[source_id(source)].append(
-                            frame, elapsed_us=elapsed_us, packet_index=packet_index
-                        )
-        except BaseException as error:
-            self._errors.append(error)
-            self._stop.set()
-
     def stop(self) -> SessionDraft:
+        if self.draft.state is RecordingState.FINALIZED:
+            return self.draft
         if self.draft.state is not RecordingState.RECORDING:
             raise RecordingError("Session 目前不在錄製中")
-        self._stop.set()
-        for thread in self._threads:
-            thread.join(timeout=2.0)
-        if any(thread.is_alive() for thread in self._threads):
-            self.abort()
-            raise RecordingError("IMU reader 無法在期限內停止")
-        for connection in self._connections.values():
-            connection.close()
-        if self._errors:
-            self.abort()
-            raise RecordingError("錄製 IMU 資料時發生錯誤") from self._errors[0]
         try:
-            descriptors = []
-            for source in self.sources:
-                csv_id = self.csv_ids[source_id(source)]
-                recorder = self._recorders[source_id(source)]
-                inspection = recorder.finalize()
-                descriptors.append(CsvDescriptor(
-                    csv_id=csv_id,
-                    filename=recorder.final_path.name,
-                    source=source_descriptor(source),
-                    row_count=inspection.row_count,
-                    size_bytes=inspection.size_bytes,
-                    sha256=inspection.sha256,
-                ))
+            result = self.capture.stop()
             metadata = SessionMetadata(
                 session_id=self.draft.session_id,
                 desktop_version=self.desktop_version,
-                started_at=datetime.fromtimestamp(self._started_epoch, tz=timezone.utc),
-                ended_at=datetime.fromtimestamp(self.wall_clock(), tz=timezone.utc),
-                csv_files=tuple(descriptors),
+                started_at=result.started_at,
+                ended_at=result.ended_at,
+                csv_files=result.descriptors,
                 analyses=(self.job,),
             )
             (self.draft.directory / "metadata.json").write_text(
@@ -463,15 +395,6 @@ class LiveAnalysisRecording:
             raise
 
     def abort(self) -> None:
-        self._stop.set()
-        for connection in self._connections.values():
-            try:
-                connection.close()
-            except Exception:
-                pass
-        for recorder in self._recorders.values():
-            recorder.abort()
+        self.capture.discard()
         self.draft.fail()
-        if self.draft.directory.exists():
-            shutil.rmtree(self.draft.directory)
         self.draft.close()

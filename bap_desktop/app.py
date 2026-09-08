@@ -307,6 +307,7 @@ def main() -> int:
         restore_session=not smoke_test,
         analysis_flow=analysis_flow,
         measurement_sessions_dir=settings.measurement_sessions_dir,
+        benchmark_recordings_dir=settings.benchmark_recordings_dir,
         desktop_version=__version__,
     )
     app.aboutToQuit.connect(window.shutdown)

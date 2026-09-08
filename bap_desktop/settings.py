@@ -22,6 +22,10 @@ class DesktopSettings(BaseSettings):
         return self.data_dir / "temp" / "imu-diagnostics"
 
     @property
+    def benchmark_recordings_dir(self) -> Path:
+        return self.data_dir / "temp" / "benchmark-recordings"
+
+    @property
     def measurement_sessions_dir(self) -> Path:
         return self.data_dir / "measurement-sessions"
 
@@ -40,5 +44,6 @@ class DesktopSettings(BaseSettings):
     def prepare_local_directories(self) -> None:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.temp_imu_dir.mkdir(parents=True, exist_ok=True)
+        self.benchmark_recordings_dir.mkdir(parents=True, exist_ok=True)
         self.measurement_sessions_dir.mkdir(parents=True, exist_ok=True)
         self.update_dir.mkdir(parents=True, exist_ok=True)

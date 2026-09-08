@@ -61,7 +61,7 @@ QPushButton {
     color: #182027;
 }
 QPushButton:hover { background: #F1F3F4; }
-QPushButton:focus, QLineEdit:focus, QComboBox:focus, QTabBar::tab:focus {
+QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTextEdit:focus, QTabBar::tab:focus {
     border: 2px solid #1769AA;
 }
 QPushButton:disabled { color: #929A9F; background: #E7EAED; border-color: #D8DDE0; }
@@ -86,7 +86,7 @@ QPushButton[nav="true"] {
 }
 QPushButton[nav="true"]:hover { color: #FFFFFF; background: #30383E; }
 QPushButton[nav="true"]:checked { color: #FFFFFF; background: #3B444B; border-left: 3px solid #E6535F; }
-QLineEdit, QComboBox {
+QLineEdit, QComboBox, QSpinBox, QTextEdit {
     min-height: 40px;
     padding: 5px 9px;
     background: #FFFFFF;
