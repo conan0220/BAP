@@ -23,6 +23,7 @@ class AppShell(QWidget):
     home_requested = Signal()
     diagnostics_requested = Signal()
     punch_item_requested = Signal(str)
+    benchmark_requested = Signal()
     logout_requested = Signal()
 
     def __init__(self, home_page: QWidget, parent=None) -> None:
@@ -75,6 +76,15 @@ class AppShell(QWidget):
                 item_icon,
                 lambda name=item_name: self.punch_item_requested.emit(name),
             )
+        self._add_section_label(sidebar_layout, "開發工具")
+        tool_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+        self._add_nav_button(
+            sidebar_layout,
+            "benchmark-recorder",
+            "Benchmark 資料錄製",
+            tool_icon,
+            self.benchmark_requested.emit,
+        )
         sidebar_layout.addStretch(1)
         self.server_status = QLabel(text.SERVER_CONNECTED)
         self.server_status.setObjectName("brandSubtitle")

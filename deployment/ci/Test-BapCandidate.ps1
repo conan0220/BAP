@@ -150,9 +150,29 @@ uvicorn.run(app, host="127.0.0.1", port=12345)
 } finally {
     if ($BackendProcess -and -not $BackendProcess.HasExited) {
         Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
-        $BackendProcess.WaitForExit()
+        if (-not $BackendProcess.WaitForExit(10000)) {
+            throw "Backend Candidate process did not stop within 10 seconds."
+        }
     }
-    if (Test-Path -LiteralPath $Database -PathType Leaf) { Remove-Item -LiteralPath $Database -Force }
+    if ($BackendProcess) {
+        $BackendProcess.Dispose()
+    }
+    if (Test-Path -LiteralPath $Database -PathType Leaf) {
+        $DatabaseRemoved = $false
+        for ($Attempt = 1; $Attempt -le 20; $Attempt++) {
+            try {
+                Remove-Item -LiteralPath $Database -Force
+                $DatabaseRemoved = $true
+                break
+            } catch [System.IO.IOException] {
+                if ($Attempt -eq 20) { throw }
+                Start-Sleep -Milliseconds 500
+            }
+        }
+        if (-not $DatabaseRemoved) {
+            throw "Unable to remove the Candidate E2E Database after waiting 10 seconds."
+        }
+    }
     if (Test-Path -LiteralPath $Release -PathType Container) {
         Remove-BapTreeWithinRoot -Root $WorkDirectory -Path $Release
     }

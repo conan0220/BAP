@@ -86,6 +86,70 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
     assert _run_api_e2e() == 0
 
 
+
+def test_api_e2e_analysis_polling_waits_for_completed() -> None:
+    from bap_desktop.app import _wait_for_api_e2e_analysis
+
+    class Analysis:
+        def __init__(self) -> None:
+            self.statuses = iter(("pending", "processing", "completed"))
+            self.calls = 0
+
+        def analysis_status(self, session_id, analysis_id, access_token):
+            assert (session_id, analysis_id, access_token) == ("session", "analysis", "token")
+            self.calls += 1
+            status = next(self.statuses)
+            return {
+                "status": status,
+                "result": {"total_punch_count": 2} if status == "completed" else None,
+            }
+
+    now = [0.0]
+    analysis = Analysis()
+    result = _wait_for_api_e2e_analysis(
+        analysis, "session", "analysis", "token",
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.1,
+        monotonic=lambda: now[0],
+        sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+    )
+    assert result["status"] == "completed"
+    assert analysis.calls == 3
+
+
+def test_api_e2e_analysis_polling_times_out_with_last_status() -> None:
+    from bap_desktop.app import _wait_for_api_e2e_analysis
+
+    class Analysis:
+        def analysis_status(self, *_args):
+            return {"status": "processing", "result": None}
+
+    now = [0.0]
+    with pytest.raises(RuntimeError, match="Timed out.*last status: processing"):
+        _wait_for_api_e2e_analysis(
+            Analysis(), "session", "analysis", "token",
+            timeout_seconds=0.2,
+            poll_interval_seconds=0.1,
+            monotonic=lambda: now[0],
+            sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+        )
+
+
+def test_api_e2e_analysis_polling_reports_backend_failure() -> None:
+    from bap_desktop.app import _wait_for_api_e2e_analysis
+
+    class Analysis:
+        def analysis_status(self, *_args):
+            return {
+                "status": "failed",
+                "error_code": "executor_unavailable",
+                "safe_error_message": "此分析功能尚未提供",
+                "result": None,
+            }
+
+    with pytest.raises(RuntimeError, match="executor_unavailable.*此分析功能尚未提供"):
+        _wait_for_api_e2e_analysis(Analysis(), "session", "analysis", "token")
+
 def test_packaged_api_e2e_failure_is_machine_readable(tmp_path, monkeypatch) -> None:
     import bap_desktop.app as desktop_app
 
