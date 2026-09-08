@@ -68,12 +68,14 @@ class BenchmarkRecorderPage(QWidget):
         self.setup_card = Card(); setup = QFormLayout(self.setup_card); setup.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows); setup.setContentsMargins(20, 18, 20, 20); setup.setSpacing(12)
         self.status = QLabel("正在準備掃描 IMU…"); self.status.setObjectName("sectionTitle"); self.status.setWordWrap(True)
         self.progress = QProgressBar(); self.progress.setRange(0, 0); self.progress.setAccessibleName("Benchmark IMU 掃描進度")
+        self.analysis_selector = QComboBox(); self.analysis_selector.setAccessibleName("Benchmark 錄製項目")
+        self.analysis_selector.addItem("出拳次數", "punch_count")
         self.left_selector = QComboBox(); self.left_selector.setAccessibleName("左手腕 IMU")
         self.right_selector = QComboBox(); self.right_selector.setAccessibleName("右手腕 IMU")
         self._selectors = {"left_wrist": self.left_selector, "right_wrist": self.right_selector}
         self._clear_sources()
         self.duration = QSpinBox(); self.duration.setRange(5, 3600); self.duration.setValue(60); self.duration.setSuffix(" 秒"); self.duration.setAccessibleName("預定錄製時間")
-        setup.addRow(self.status); setup.addRow(self.progress); setup.addRow("活動類型", QLabel("Shadow boxing")); setup.addRow("左手腕", self.left_selector); setup.addRow("右手腕", self.right_selector); setup.addRow("錄製時間", self.duration)
+        setup.addRow(self.status); setup.addRow(self.progress); setup.addRow("Benchmark 項目", self.analysis_selector); setup.addRow("活動類型", QLabel("Shadow boxing")); setup.addRow("左手腕", self.left_selector); setup.addRow("右手腕", self.right_selector); setup.addRow("錄製時間", self.duration)
         layout.addWidget(self.setup_card)
 
         self.label_card = Card(); form = QFormLayout(self.label_card); form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows); form.setContentsMargins(20, 18, 20, 20); form.setSpacing(12)
@@ -161,7 +163,7 @@ class BenchmarkRecorderPage(QWidget):
             self.coordinator.set_assignments(assignments); self.coordinator.start(self.duration.value())
         except BenchmarkRecorderError as error:
             self.status.setText(str(error)); return
-        self.duration.setEnabled(False); self.left_selector.setEnabled(False); self.right_selector.setEnabled(False); self.retry_button.setVisible(False)
+        self.analysis_selector.setEnabled(False); self.duration.setEnabled(False); self.left_selector.setEnabled(False); self.right_selector.setEnabled(False); self.retry_button.setVisible(False)
         self.primary_button.setText("提前結束"); self.primary_button.setEnabled(True); self._record_timer.start(); self._refresh_recording_status()
 
     def _refresh_recording_status(self) -> None:
