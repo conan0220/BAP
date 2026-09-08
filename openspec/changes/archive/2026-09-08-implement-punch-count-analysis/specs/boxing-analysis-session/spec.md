@@ -71,3 +71,15 @@ Desktop App MUST 讓 user 在開始正式測量前指定整數 Session duration�
 - **WHEN** user 指定的時間尚未到達，但必要無線 Node 中斷
 - **THEN** `actual_duration_seconds` 小於預定時間
 - **AND** `stop_reason` 為 `source_interrupted`
+
+### Requirement: 分析完成後必須允許重新測量
+Desktop App MUST 在顯示 Backend Result 後提供「重新測量」操作。user 按下後，系統 MUST 清除上一個 Session 的畫面狀態，重新檢測所有 Port，並要求 user 重新分配本次要使用的 IMU。
+
+#### Scenario: user 在結果頁重新測量
+- **WHEN** Backend 已完成分析並且 Desktop App 已顯示 Result
+- **THEN** Desktop App 顯示可操作的「重新測量」按鈕
+- **AND** 畫面不再顯示上一個 Session 的錄製時間控制與計時資訊
+- **WHEN** user 按下「重新測量」
+- **THEN** Desktop App 清除上一個 Session 的 Result 與識別資訊
+- **AND** 自動重新檢測所有 Port
+- **AND** 回到 IMU 分配階段

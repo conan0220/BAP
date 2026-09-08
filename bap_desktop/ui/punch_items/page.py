@@ -185,13 +185,24 @@ class PunchItemPage(QWidget):
     def start_discovery(self) -> None:
         if self._shutdown:
             return
+        self._elapsed_timer.stop()
         if self._cancel_event is not None:
             self._cancel_event.set()
         self._cancel_event = Event()
         self.assignments.clear()
+        self._recording = None
+        self._draft = None
+        self._remote_session_id = None
+        self._remote_analysis_id = None
+        self._elapsed_seconds = 0
         self._measurement_state = "assigning"
         self.continue_button.setText("繼續")
+        self.continue_button.setAccessibleName("繼續設定目前的拳擊分析項目")
         self.analysis_chip.setText("可使用" if self._is_available_item else "分析功能待開發")
+        self.duration_input.setEnabled(True)
+        self.duration_row.setVisible(False)
+        self.timer_details.clear()
+        self.timer_details.setVisible(False)
         self._latest_sources = ()
         self._clear_source_selectors()
         self.message.clear()
@@ -334,6 +345,8 @@ class PunchItemPage(QWidget):
             self._upload_and_wait()
         elif self._measurement_state == "poll_failed":
             self._poll_status()
+        elif self._measurement_state == "completed":
+            self.start_discovery()
 
     def _prepare_session(self) -> None:
         required = len(self.definition.placements)
@@ -535,6 +548,13 @@ class PunchItemPage(QWidget):
         self._measurement_state = "completed"
         self.status.setText(f"分析完成｜Session {validated.session_id or self._draft.session_id}")
         self.analysis_chip.setText("分析完成")
+        self.duration_input.setEnabled(True)
+        self.duration_row.setVisible(False)
+        self.timer_details.setVisible(False)
+        self.continue_button.setText("重新測量")
+        self.continue_button.setAccessibleName("重新測量並再次檢測 IMU")
+        self.continue_button.setEnabled(True)
+        self.retry_button.setVisible(False)
         self._clear_source_selectors()
         labels = (
             ("總出拳次數", "total_punch_count"),

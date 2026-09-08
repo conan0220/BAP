@@ -602,6 +602,44 @@ def test_completed_result_is_rendered_with_session_identity(qtbot) -> None:
     assert "右手：3" in visible
 
 
+@pytest.mark.scenario("boxing-analysis-session", "user 在結果頁重新測量")
+def test_completed_result_offers_restart_and_returns_to_imu_discovery(qtbot) -> None:
+    from types import SimpleNamespace
+
+    class Flow:
+        def validate_completed(self, _payload):
+            return SimpleNamespace(
+                session_id="session-123",
+                analysis_id="analysis-1",
+                result={
+                    "left_punch_count": 2,
+                    "right_punch_count": 3,
+                    "total_punch_count": 5,
+                },
+            )
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page.analysis_flow = Flow()
+    page.duration_row.setVisible(True)
+    page.timer_details.setVisible(True)
+    page.duration_input.setEnabled(False)
+    page._analysis_status_ready({"status": "completed"})
+
+    assert page.continue_button.text() == "重新測量"
+    assert page.continue_button.isEnabled()
+    assert not page.duration_row.isVisible()
+    assert not page.timer_details.isVisible()
+
+    page.continue_button.click()
+
+    assert page._measurement_state == "assigning"
+    assert page._draft is None
+    assert page._remote_session_id is None
+    assert page._remote_analysis_id is None
+    assert page.continue_button.text() == "繼續"
+    assert "分析完成" not in page.status.text()
+
+
 @pytest.mark.scenario("desktop-ui-design", "正在上傳或分析")
 def test_pending_backend_status_is_not_rendered_as_result(qtbot) -> None:
     page = make_punch_page(qtbot, "出拳次數")
