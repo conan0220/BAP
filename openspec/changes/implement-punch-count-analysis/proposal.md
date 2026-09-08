@@ -21,8 +21,10 @@
 - 將同一次伸拳、減速及收拳視為一個完整動作區段，避免單純計算 acceleration peaks 而把同一拳重複計數。
 - 產生左右手拳數與總拳數，並在輸入資料不足或時間資料不可用時回報可辨認的安全錯誤。Session 的實際錄製時間保存在 Session Metadata，不重複放進分析 Result。
 - 讓 user 在出拳次數頁面輸入 Session duration；時間到時自動結束，並允許 user 在錄製期間提前結束。
-- 保存預定時間、實際時間與結束原因；所有時間相關判斷使用實際錄製時間，不使用原本預定時間。
-- 將 user 提供且人工確認拳數的左右手 Session CSV 納入 versioned Benchmark，並由 pytest 在 source-level CI 中執行回歸驗證。
+- 錄製期間任一必要無線 Node 連續一秒沒有有效 Frame 時，自動停止整個 Session；若左右手都已有有效資料，保留並上傳中斷前資料繼續分析。
+- 保存預定時間、實際時間與 `duration_reached`、`ended_by_user` 或 `source_interrupted` 結束原因；所有時間相關判斷使用實際錄製時間，不使用原本預定時間。
+- 直接重用既有 `tests/fixtures/punch_count/` 內的五份 Benchmark ZIP、Metadata、Ground Truth 與 checksum，不另外建立第二套 manifest／資料夾格式。
+- 以這五份資料校正第一版規則並執行 source-level CI regression；它們只能證明已知 cases 沒有回歸，不作為獨立或無偏差的準確率評估。
 - 第一版不包含擊中沙包或手靶的動作、不辨識拳種，也不導入 Machine Learning。
 
 ## 能力
@@ -44,5 +46,5 @@
 - Backend Session schema 與 Database 需要相容的 migration，以保存預定時間、實際時間與結束原因。
 - Backend 的 Analysis Specification registry、Punch Count Executor、Result schema 與安全錯誤處理。
 - Common IMU CSV 的讀取與時間軸正規化；不修改 Common IMU CSV version 1 的 23 欄 schema。
-- `tests/fixtures/punch_count/` 的 Benchmark 資料、manifest 與 pytest regression tests。
+- `tests/fixtures/punch_count/` 的五份既有 Benchmark ZIP、共用唯讀 loader 與 pytest regression tests。
 - 既有 Session upload、SQLite CSV BLOB 保存及 Analysis Job 查詢 API 可繼續使用，不新增另一套上傳流程。

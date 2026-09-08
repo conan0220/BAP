@@ -80,6 +80,9 @@ class MeasurementSession(Base):
     desktop_version: Mapped[str] = mapped_column(String(32))
     started_at: Mapped[datetime] = mapped_column(DateTime)
     ended_at: Mapped[datetime] = mapped_column(DateTime)
+    requested_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_duration_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    stop_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

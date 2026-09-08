@@ -95,25 +95,14 @@ with factory() as session:
         if ($LASTEXITCODE -ne 0) { throw "Candidate migration rollback rehearsal failed." }
         & $Python -m alembic -c (Join-Path $Release "alembic.ini") upgrade head
         if ($LASTEXITCODE -ne 0) { throw "Candidate migration re-apply failed." }
-        $ReferenceApp = Join-Path $WorkDirectory "ci_reference_backend.py"
-        @'
-from bap_backend.app.main import create_app
-from bap_backend.app.services.analysis_registry import AnalysisRegistry
-from bap_common.analysis_contracts import builtin_analysis_specifications
-import uvicorn
-
-class ReferencePunchCountExecutor:
-    def execute(self, *, inputs, parameters):
-        if set(inputs) != {"left_wrist", "right_wrist"}:
-            raise ValueError("unexpected CI inputs")
-        return {"left_punch_count": 1, "right_punch_count": 1, "total_punch_count": 2}
-
-registry = AnalysisRegistry(builtin_analysis_specifications())
-registry.register_executor("punch_count", 1, ReferencePunchCountExecutor())
-app = create_app(analysis_registry=registry)
-uvicorn.run(app, host="127.0.0.1", port=12345)
-'@ | Set-Content -LiteralPath $ReferenceApp -Encoding utf8
-        $BackendProcess = Start-Process -FilePath $Python -ArgumentList @($ReferenceApp) -RedirectStandardOutput $BackendOut -RedirectStandardError $BackendErr -PassThru -WindowStyle Hidden
+        # 啟動 Artifact 內真正的 Backend application。不要在 Candidate E2E 注入固定結果，
+        # 否則安裝後 Desktop 即使沒有成功呼叫 Production Executor，測試仍可能誤判為通過。
+        $BackendProcess = Start-Process -FilePath $Python `
+            -ArgumentList @("-m", "uvicorn", "bap_backend.app.main:app", "--host", "127.0.0.1", "--port", "12345") `
+            -RedirectStandardOutput $BackendOut `
+            -RedirectStandardError $BackendErr `
+            -PassThru `
+            -WindowStyle Hidden
     } finally {
         Pop-Location
     }

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import zipfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -15,18 +14,17 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from bap_common.benchmark_bundle import (
+    BenchmarkBundleError as BenchmarkRecorderError,
     BenchmarkGroundTruth,
     BenchmarkInputDescriptor,
     BenchmarkMetadata,
     BenchmarkStopReason,
+    LoadedBenchmarkBundle,
+    load_benchmark_bundle,
 )
-from bap_common.imu_csv import inspect_common_imu_csv, inspect_common_imu_csv_bytes
+from bap_common.imu_csv import inspect_common_imu_csv
 from bap_desktop.services.imu_capture import CaptureDuration, ImuCaptureResult, LiveImuCapture
 from bap_desktop.services.imu_discovery import DiscoveryResult, ImuSource
-
-
-class BenchmarkRecorderError(RuntimeError):
-    pass
 
 
 class BenchmarkRecorderState(StrEnum):
@@ -38,12 +36,6 @@ class BenchmarkRecorderState(StrEnum):
     EXPORTED = "exported"
     FAILED = "failed"
     DISCARDED = "discarded"
-
-
-@dataclass(frozen=True, slots=True)
-class LoadedBenchmarkBundle:
-    metadata: BenchmarkMetadata
-    csv_by_role: dict[str, bytes]
 
 
 class BenchmarkRecorderCoordinator:
@@ -253,34 +245,6 @@ def validate_benchmark_staging(metadata: BenchmarkMetadata, directory: Path) -> 
             or inspection.sha256 != item.sha256
         ):
             raise BenchmarkRecorderError(f"{item.filename} 與 Metadata 不一致")
-
-
-def load_benchmark_bundle(path: Path) -> LoadedBenchmarkBundle:
-    try:
-        with zipfile.ZipFile(path, "r") as archive:
-            names = archive.namelist()
-            if len(names) != len(set(names)) or "metadata.json" not in names:
-                raise BenchmarkRecorderError("Benchmark ZIP entry 不完整或重複")
-            if any(Path(name).name != name or name.startswith(("/", "\\")) for name in names):
-                raise BenchmarkRecorderError("Benchmark ZIP 不得包含資料夾或絕對路徑")
-            metadata = BenchmarkMetadata.model_validate_json(archive.read("metadata.json"))
-            expected = {"metadata.json", *(item.filename for item in metadata.inputs)}
-            if set(names) != expected:
-                raise BenchmarkRecorderError("Benchmark ZIP 內容與 Metadata 不一致")
-            csv_by_role = {}
-            for item in metadata.inputs:
-                data = archive.read(item.filename)
-                inspection = inspect_common_imu_csv_bytes(data)
-                if (
-                    inspection.row_count != item.row_count
-                    or inspection.size_bytes != item.size_bytes
-                    or inspection.sha256 != item.sha256
-                ):
-                    raise BenchmarkRecorderError(f"{item.filename} checksum 或內容不正確")
-                csv_by_role[item.input_role] = data
-            return LoadedBenchmarkBundle(metadata=metadata, csv_by_role=csv_by_role)
-    except (OSError, zipfile.BadZipFile, KeyError, ValueError) as error:
-        raise BenchmarkRecorderError("Benchmark ZIP 無法通過驗證") from error
 
 
 def export_benchmark_bundle(metadata: BenchmarkMetadata, staging_directory: Path, destination: Path) -> Path:

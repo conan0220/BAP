@@ -199,6 +199,7 @@ class LiveImuCapture:
         return tuple(
             source
             for source in self.sources
+            if source.connection_type is ConnectionType.WIRELESS_RECEIVER
             if current - last_seen.get(self._source_id(source), self._started_monotonic)
             >= timeout_seconds
         )

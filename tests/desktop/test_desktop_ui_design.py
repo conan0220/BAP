@@ -113,7 +113,7 @@ def test_keyboard_can_activate_navigation_and_focus_is_visually_defined(qtbot) -
 
 @pytest.mark.scenario("desktop-ui-design", "顯示待開發項目")
 @pytest.mark.scenario("desktop-app-shell", "查看拳擊測量項目")
-def test_home_has_five_separate_pending_items_with_new_name(qtbot) -> None:
+def test_home_has_one_available_item_and_four_pending_items(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
 
@@ -124,8 +124,27 @@ def test_home_has_five_separate_pending_items_with_new_name(qtbot) -> None:
         "出拳軌跡",
         "拳種辨識",
     )
-    assert all("待開發" in button.text() for button in window.home_page.punch_buttons.values())
+    assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
+    assert all(
+        "待開發" in button.text()
+        for name, button in window.home_page.punch_buttons.items()
+        if name != "出拳次數"
+    )
     assert not any("拳型辨識" in button.text() for button in window.home_page.punch_buttons.values())
+
+
+def test_punch_count_page_is_not_labeled_as_pending(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳次數")
+
+    assert page.analysis_chip.text() == "可使用"
+    assert page.analysis_chip.objectName() == "statusChip"
+
+
+def test_unimplemented_item_page_remains_labeled_as_pending(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳速度")
+
+    assert page.analysis_chip.text() == "分析功能待開發"
+    assert page.analysis_chip.objectName() == "pendingChip"
 
 
 @pytest.mark.scenario("desktop-app-shell", "進入單一拳擊項目")
@@ -440,7 +459,8 @@ def test_executable_capability_enables_start_measurement(qtbot, tmp_path: Path) 
 def test_unavailable_capability_does_not_record(qtbot) -> None:
     page = make_punch_page(qtbot, "出拳次數")
     page._capability_ready(AnalysisCapability(builtin_analysis_specifications()[0], False))
-    assert "待開發" in page.status.text()
+    assert "Backend 目前沒有提供" in page.status.text()
+    assert page.analysis_chip.text() == "目前無法使用"
     assert not page.continue_button.isEnabled()
 
 
@@ -458,10 +478,12 @@ def test_discovery_is_cleared_before_formal_recording(qtbot) -> None:
 @pytest.mark.scenario("desktop-ui-design", "正在錄製")
 @pytest.mark.scenario("boxing-analysis-session", "user 開始新的測量")
 @pytest.mark.scenario("boxing-analysis-session", "從出拳次數頁面建立 Session")
+@pytest.mark.scenario("boxing-analysis-session", "使用預設時間開始")
 def test_start_measurement_shows_elapsed_time_and_stop_action(qtbot, tmp_path: Path) -> None:
     class Recording:
         def __init__(self, *_args, **_kwargs):
             self.started = False
+            self.kwargs = _kwargs
 
         def start(self):
             self.started = True
@@ -481,9 +503,77 @@ def test_start_measurement_shows_elapsed_time_and_stop_action(qtbot, tmp_path: P
 
     assert page._recording.started
     assert page._measurement_state == "recording"
-    assert page.continue_button.text() == "結束測量"
-    assert "00:01" in page.status.text()
+    assert page.continue_button.text() == "提前結束測量"
+    assert page._recording.kwargs["requested_duration_seconds"] == 60
+    assert "已錄製" in page.timer_details.text()
+    assert "剩餘" in page.timer_details.text()
     page.shutdown()
+
+
+@pytest.mark.scenario("boxing-analysis-session", "輸入無效時間")
+@pytest.mark.parametrize("value", ("", "4", "3601", "1.5", "abc"))
+def test_invalid_session_duration_does_not_start_recording(qtbot, tmp_path: Path, value: str) -> None:
+    class MustNotStart:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("invalid duration must not create a recording")
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page.recording_root = tmp_path
+    page.recording_factory = MustNotStart
+    page._measurement_state = "ready"
+    page.duration_input.setText(value)
+    page._start_measurement()
+
+    assert page._measurement_state == "ready"
+    assert "5～3600" in page.status.text()
+
+
+@pytest.mark.scenario("boxing-analysis-session", "輸入有效的自訂時間")
+def test_custom_session_duration_is_forwarded_to_recording(qtbot, tmp_path: Path) -> None:
+    captured = {}
+
+    class Recording:
+        def __init__(self, *_args, **kwargs):
+            captured.update(kwargs)
+
+        def start(self):
+            pass
+
+        def abort(self):
+            pass
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page.recording_root = tmp_path
+    page.recording_factory = Recording
+    page._measurement_state = "ready"
+    page.duration_input.setText("125")
+    page._start_measurement()
+    assert captured["requested_duration_seconds"] == 125
+    page.shutdown()
+
+
+@pytest.mark.scenario("boxing-analysis-session", "錄製期間無線 Node 中斷")
+def test_timer_forwards_source_interruption_to_single_finalizer(qtbot) -> None:
+    reasons = []
+
+    class Recording:
+        def elapsed_seconds(self):
+            return 1.1
+
+        def remaining_seconds(self):
+            return 58.9
+
+        def due_stop_reason(self):
+            from bap_common.analysis_session import SessionStopReason
+            return SessionStopReason.SOURCE_INTERRUPTED
+
+    page = make_punch_page(qtbot, "出拳次數")
+    page._recording = Recording()
+    page._measurement_state = "recording"
+    page._finish_measurement = lambda reason: reasons.append(reason)
+    page._update_elapsed()
+    from bap_common.analysis_session import SessionStopReason
+    assert reasons == [SessionStopReason.SOURCE_INTERRUPTED]
 
 
 @pytest.mark.scenario("desktop-ui-design", "收到有效 Result")
@@ -495,7 +585,11 @@ def test_completed_result_is_rendered_with_session_identity(qtbot) -> None:
         def validate_completed(self, _payload):
             return SimpleNamespace(
                 session_id="session-123", analysis_id="analysis-1",
-                result={"total_punch_count": 5},
+                result={
+                    "left_punch_count": 2,
+                    "right_punch_count": 3,
+                    "total_punch_count": 5,
+                },
             )
 
     page = make_punch_page(qtbot, "出拳次數")
@@ -503,7 +597,9 @@ def test_completed_result_is_rendered_with_session_identity(qtbot) -> None:
     page._analysis_status_ready({"status": "completed"})
     visible = " ".join(label.text() for label in page.findChildren(QLabel))
     assert "session-123" in visible
-    assert "total_punch_count：5" in visible
+    assert "總出拳次數：5" in visible
+    assert "左手：2" in visible
+    assert "右手：3" in visible
 
 
 @pytest.mark.scenario("desktop-ui-design", "正在上傳或分析")

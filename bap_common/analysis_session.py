@@ -21,6 +21,12 @@ class SourceConnectionType(StrEnum):
     WIRELESS_RECEIVER = "wireless_receiver"
 
 
+class SessionStopReason(StrEnum):
+    DURATION_REACHED = "duration_reached"
+    ENDED_BY_USER = "ended_by_user"
+    SOURCE_INTERRUPTED = "source_interrupted"
+
+
 class ImuSourceDescriptor(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -93,11 +99,23 @@ class SessionMetadata(BaseModel):
     desktop_version: str = Field(min_length=1, max_length=32)
     started_at: datetime
     ended_at: datetime
+    requested_duration_seconds: int | None = Field(default=None, ge=5, le=3600, strict=True)
+    actual_duration_seconds: float | None = Field(default=None, gt=0)
+    stop_reason: SessionStopReason | None = None
     csv_files: tuple[CsvDescriptor, ...]
     analyses: tuple[AnalysisJobRequest, ...]
 
     @model_validator(mode="after")
     def validate_package_references(self) -> "SessionMetadata":
+        duration_values = (
+            self.requested_duration_seconds,
+            self.actual_duration_seconds,
+            self.stop_reason,
+        )
+        if self.metadata_schema_version == 1 and any(value is not None for value in duration_values):
+            raise ValueError("Metadata version 1 不得包含錄製時間或結束原因")
+        if self.metadata_schema_version == 2 and any(value is None for value in duration_values):
+            raise ValueError("Metadata version 2 必須包含預定時間、實際時間與結束原因")
         if self.ended_at < self.started_at:
             raise ValueError("Session 結束時間不得早於開始時間")
         if not self.csv_files:

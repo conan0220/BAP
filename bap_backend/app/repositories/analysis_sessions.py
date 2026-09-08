@@ -57,6 +57,9 @@ class AnalysisSessionRepository:
             desktop_version=metadata.desktop_version,
             started_at=metadata.started_at.replace(tzinfo=None),
             ended_at=metadata.ended_at.replace(tzinfo=None),
+            requested_duration_seconds=metadata.requested_duration_seconds,
+            actual_duration_seconds=metadata.actual_duration_seconds,
+            stop_reason=metadata.stop_reason.value if metadata.stop_reason is not None else None,
         )
         item.csv_files = [
             ImuCsvFile(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from bap_backend.app.models import AnalysisJob, ImuCsvFile, MeasurementSession, 
 from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
 from bap_backend.app.services.analysis_sessions import AnalysisSessionService
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
+from bap_backend.app.services.punch_count import PunchCountExecutor
 from bap_common.analysis_contracts import builtin_analysis_specifications
 from bap_common.analysis_session import (
     AnalysisInputBinding,
@@ -21,9 +23,11 @@ from bap_common.analysis_session import (
     CsvDescriptor,
     ImuSourceDescriptor,
     SessionMetadata,
+    SessionStopReason,
     SourceConnectionType,
 )
 from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv_bytes, write_header
+from bap_common.benchmark_bundle import load_benchmark_bundle
 from anrot_imu_driver.parsers.anrot_serial_parser import AnrotFrame
 from sqlalchemy import event, func, select
 
@@ -76,6 +80,21 @@ def build_package() -> tuple[SessionMetadata, dict[str, bytes]]:
         session_id=uuid4(), desktop_version="0.1.3", started_at=now, ended_at=now,
         csv_files=tuple(descriptors), analyses=(job,),
     ), contents
+
+
+def as_metadata_v2(
+    metadata: SessionMetadata,
+    *,
+    stop_reason: SessionStopReason = SessionStopReason.ENDED_BY_USER,
+) -> SessionMetadata:
+    return metadata.model_copy(
+        update={
+            "metadata_schema_version": 2,
+            "requested_duration_seconds": 60,
+            "actual_duration_seconds": 12.5,
+            "stop_reason": stop_reason,
+        }
+    )
 
 
 def make_context(tmp_path, *, with_executor: bool = True):
@@ -133,6 +152,89 @@ def test_full_http_upload_dispatch_and_result(tmp_path):
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
             assert all(item.csv_blob for item in session.scalars(select(ImuCsvFile)))
+    engine.dispose()
+
+
+@pytest.mark.scenario("analysis-session-ingestion", "Desktop 上傳來源中斷的部分 Session")
+def test_metadata_v2_source_interruption_is_saved_and_analyzed(tmp_path):
+    client, factory, engine = make_context(tmp_path)
+    with client:
+        headers = authenticated(client)
+        metadata, contents = build_package()
+        metadata = as_metadata_v2(
+            metadata, stop_reason=SessionStopReason.SOURCE_INTERRUPTED
+        )
+        response = upload(client, headers, metadata, contents)
+        assert response.status_code == 202
+        with factory() as session:
+            saved = session.get(MeasurementSession, str(metadata.session_id))
+            assert saved.requested_duration_seconds == 60
+            assert saved.actual_duration_seconds == 12.5
+            assert saved.stop_reason == "source_interrupted"
+            assert saved.analysis_jobs[0].status == "completed"
+    engine.dispose()
+
+
+@pytest.mark.scenario("analysis-session-ingestion", "Desktop 上傳來源中斷的部分 Session")
+@pytest.mark.scenario("punch-count-analysis", "成功完成分析")
+def test_real_punch_count_executor_handles_benchmark_session_over_http(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor("punch_count", 1, PunchCountExecutor())
+    fixture = next(
+        iter(sorted((Path(__file__).resolve().parents[1] / "fixtures" / "punch_count").glob("*.zip")))
+    )
+    bundle = load_benchmark_bundle(fixture)
+    descriptors = tuple(
+        CsvDescriptor(
+            csv_id=item.csv_id,
+            filename=item.filename,
+            source=item.source,
+            row_count=item.row_count,
+            size_bytes=item.size_bytes,
+            sha256=item.sha256,
+        )
+        for item in bundle.metadata.inputs
+    )
+    job = AnalysisJobRequest(
+        analysis_id=uuid4(),
+        analysis_type="punch_count",
+        spec_version=1,
+        input_bindings=tuple(
+            AnalysisInputBinding(input_role=item.input_role, csv_id=item.csv_id)
+            for item in bundle.metadata.inputs
+        ),
+    )
+    now = datetime.now(timezone.utc)
+    metadata = SessionMetadata(
+        session_id=uuid4(),
+        metadata_schema_version=2,
+        desktop_version="0.1.10",
+        started_at=now,
+        ended_at=now,
+        requested_duration_seconds=bundle.metadata.requested_duration_seconds,
+        actual_duration_seconds=bundle.metadata.actual_duration_seconds,
+        stop_reason=SessionStopReason.SOURCE_INTERRUPTED,
+        csv_files=descriptors,
+        analyses=(job,),
+    )
+    contents = {
+        item.filename: bundle.csv_by_role[item.input_role]
+        for item in bundle.metadata.inputs
+    }
+    with client:
+        headers = authenticated(client)
+        accepted = upload(client, headers, metadata, contents)
+        assert accepted.status_code == 202
+        result = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/{job.analysis_id}",
+            headers=headers,
+        )
+        assert result.status_code == 200
+        assert result.json()["result"] == bundle.metadata.ground_truth.model_dump()
+        with factory() as session:
+            saved = session.get(MeasurementSession, str(metadata.session_id))
+            assert saved.stop_reason == "source_interrupted"
+            assert len(saved.csv_files) == 2
     engine.dispose()
 
 
@@ -251,6 +353,29 @@ def test_invalid_executor_result_is_failed_without_fake_result(tmp_path):
             assert job.status == "failed"
             assert job.result is None
             assert job.error_code in {"missing_result_field", "invalid_result_type"}
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-count-analysis", "CSV 沒有足夠有效資料")
+def test_punch_count_data_error_is_safe_and_keeps_original_csv(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor("punch_count", 1, PunchCountExecutor())
+    with client:
+        headers = authenticated(client)
+        metadata, contents = build_package()
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/{metadata.analyses[0].analysis_id}",
+            headers=headers,
+        ).json()
+        assert payload["status"] == "failed"
+        assert payload["error_code"] == "insufficient_imu_samples"
+        assert payload["result"] is None
+        assert "Traceback" not in payload["safe_error_message"]
+        assert str(tmp_path) not in payload["safe_error_message"]
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+            assert all(item.csv_blob for item in session.scalars(select(ImuCsvFile)))
     engine.dispose()
 
 

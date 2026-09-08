@@ -139,6 +139,7 @@ def test_live_capture_writes_one_csv_per_wired_port(tmp_path: Path) -> None:
 
 
 @pytest.mark.scenario("benchmark-data-recorder", "錄製期間任一必要來源失敗")
+@pytest.mark.scenario("boxing-analysis-session", "中斷來源完全沒有有效資料")
 @pytest.mark.parametrize("connection", [Connection(), Connection(error=OSError("disconnected"))])
 def test_live_capture_rejects_zero_frames_or_source_failure(tmp_path: Path, connection: Connection) -> None:
     capture = LiveImuCapture(tmp_path, assignments={"left_wrist": ImuSource("COM1", ConnectionType.WIRED)}, adapter=Adapter({"COM1": connection}))

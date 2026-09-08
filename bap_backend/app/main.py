@@ -20,11 +20,18 @@ from bap_backend.app.services.auth import utcnow
 from bap_backend.app.services.errors import ServiceError
 from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
+from bap_backend.app.services.punch_count import PunchCountExecutor
 from bap_common.analysis_contracts import builtin_analysis_specifications
 
 
 def _error(code: str, message: str, status_code: int) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
+
+
+def create_default_analysis_registry() -> AnalysisRegistry:
+    registry = AnalysisRegistry(builtin_analysis_specifications())
+    registry.register_executor("punch_count", 1, PunchCountExecutor())
+    return registry
 
 
 def create_app(
@@ -44,9 +51,7 @@ def create_app(
     application.state.session_factory = session_factory
     application.state.clock = clock
     application.state.refresh_token_generator = refresh_token_generator
-    application.state.analysis_registry = analysis_registry or AnalysisRegistry(
-        builtin_analysis_specifications()
-    )
+    application.state.analysis_registry = analysis_registry or create_default_analysis_registry()
     application.state.analysis_dispatcher = AnalysisDispatcher(
         session_factory, application.state.analysis_registry
     )

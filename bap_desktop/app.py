@@ -164,6 +164,7 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
         CsvDescriptor,
         ImuSourceDescriptor,
         SessionMetadata,
+        SessionStopReason,
         SourceConnectionType,
     )
     from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv_bytes, write_header
@@ -210,27 +211,37 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
         item for item in capabilities if item.specification.analysis_type == "punch_count"
     )
     if not punch_count.executable:
-        raise RuntimeError("CI Reference Executor is not available")
+        raise RuntimeError("Production punch-count Executor is not available")
 
-    def fake_csv(seed: float) -> bytes:
+    def punch_csv(peak_index: int) -> bytes:
         output = io.StringIO(newline="")
         writer = write_header(output)
-        frame = AnrotFrame()
-        frame.frame_type = 0x91
-        frame.system_time_ms = 1
-        frame.acc = (seed, seed + 1, seed + 2)
-        frame.gyr = (3.0, 4.0, 5.0)
-        frame.mag = (6.0, 7.0, 8.0)
-        frame.quat = (1.0, 0.0, 0.0, 0.0)
-        frame.roll = frame.pitch = frame.yaw = 0.0
-        writer.writerow(frame_csv_row(frame, sample_index=0, packet_index=0, elapsed_us=0))
+        for index in range(300):
+            distance = abs(index - peak_index)
+            amplitude = {0: 7.0, 1: 4.0, 2: 1.0}.get(distance, 0.0)
+            frame = AnrotFrame()
+            frame.frame_type = 0x91
+            frame.system_time_ms = index * 10
+            frame.acc = (amplitude, 0.0, 1.0)
+            frame.gyr = (amplitude * 100.0, 0.0, 0.0)
+            frame.mag = (0.0, 0.0, 0.0)
+            frame.quat = (1.0, 0.0, 0.0, 0.0)
+            frame.roll = frame.pitch = frame.yaw = 0.0
+            writer.writerow(
+                frame_csv_row(
+                    frame,
+                    sample_index=index,
+                    packet_index=index,
+                    elapsed_us=index * 10_000,
+                )
+            )
         return output.getvalue().encode("utf-8")
 
     with tempfile.TemporaryDirectory(prefix="bap-installed-e2e-") as temp:
         root = Path(temp)
         descriptors = []
-        for name, seed in (("left.csv", 1.0), ("right.csv", 2.0)):
-            data = fake_csv(seed)
+        for name, peak_index in (("left.csv", 100), ("right.csv", 105)):
+            data = punch_csv(peak_index)
             (root / name).write_bytes(data)
             inspected = inspect_common_imu_csv_bytes(data)
             descriptors.append(CsvDescriptor(
@@ -251,7 +262,11 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
         )
         now = datetime.now(timezone.utc)
         metadata = SessionMetadata(
-            session_id=uuid4(), desktop_version=__version__, started_at=now, ended_at=now,
+            session_id=uuid4(), metadata_schema_version=2,
+            desktop_version=__version__, started_at=now, ended_at=now,
+            requested_duration_seconds=5,
+            actual_duration_seconds=3.0,
+            stop_reason=SessionStopReason.ENDED_BY_USER,
             csv_files=tuple(descriptors), analyses=(job,),
         )
         report("upload_session")

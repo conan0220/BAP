@@ -54,9 +54,10 @@ class HomePage(QWidget):
             "拳種辨識": "指定持把人左右手把背面的 IMU。",
         }
         for index, item_name in enumerate(text.PUNCH_ITEMS):
-            button = QPushButton(f"{item_name}\n{text.PENDING}｜{descriptions[item_name]}")
+            availability = "可使用" if item_name == "出拳次數" else text.PENDING
+            button = QPushButton(f"{item_name}\n{availability}｜{descriptions[item_name]}")
             button.setProperty("role", "card")
-            button.setAccessibleName(f"{item_name}，{text.PENDING}")
+            button.setAccessibleName(f"{item_name}，{availability}")
             button.clicked.connect(lambda _checked=False, name=item_name: self.open_punch_item.emit(name))
             self.punch_buttons[item_name] = button
             self.punch_grid.addWidget(button, index // 3, index % 3)
