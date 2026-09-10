@@ -378,7 +378,7 @@ def test_punch_speed_recording_adds_two_second_boundary_to_analysis_parameters(t
         analysis_type="punch_speed",
         spec_version=2,
         desktop_version="0.1.14",
-        requested_duration_seconds=5,
+        requested_duration_seconds=60,
         monotonic=clock,
         wall_clock=lambda: 100.0 + clock.value,
         capture_factory=FakeCapture,
@@ -386,9 +386,10 @@ def test_punch_speed_recording_adds_two_second_boundary_to_analysis_parameters(t
     recording.start()
     assert recording.is_calibrating
     assert recording.elapsed_seconds() == 0
-    assert recording.remaining_seconds() == 5
+    assert recording.remaining_seconds() == 60
     clock.value = 12.0
     assert recording.calibration_due()
+    recording.set_requested_duration(5)
     assert recording.begin_measurement() == 2_000_000
     assert not recording.is_calibrating
     clock.value = 17.0

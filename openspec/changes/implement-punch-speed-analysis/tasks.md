@@ -40,10 +40,10 @@
 
 ## 5. Desktop 校正與正式錄製
 
-- [x] 5.1 在拳頭速度頁的「開始測量」後加入兩秒校正 state，顯示「校正中，請保持預備姿勢」，並在校正完成後才啟動正式 Session timer。
+- [x] 5.1 在拳頭速度頁先說明校正姿勢與下一步；校正前與兩秒校正期間隱藏錄製時間，校正完成後才顯示錄製時間欄位與「開始正式錄製」按鈕，只有時間有效且 user 按下按鈕才啟動正式 Session timer。
 - [x] 5.2 讓左右手 CSV 從校正開始持續記錄到正式測量結束，使用同一條 Capture timeline，並把實際 `measurement_start_elapsed_us` 寫入 Analysis Parameters。
 - [x] 5.3 確認 `requested_duration_seconds` 與 `actual_duration_seconds` 不包含校正時間，且時間到、提前結束與來源中斷都只執行一次 CSV finalization 與上傳。
-- [x] 5.4 加入 Desktop tests，驗證校正提示、兩秒邊界、正式 timer、校正期間 IMU 中斷與資料不足時不開始 Session 並允許重新檢測。
+- [x] 5.4 加入 Desktop tests，驗證校正提示、錄製時間欄位只在校正後顯示、無效時間不開始錄製、兩秒邊界、正式 timer、校正期間 IMU 中斷與資料不足時不開始 Session 並允許重新檢測。
 
 ## 6. Desktop 拳頭速度結果
 

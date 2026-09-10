@@ -537,6 +537,7 @@ def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path)
             self.is_calibrating = True
             self.due = False
             self.began = False
+            self.requested_duration = None
 
         def start(self):
             pass
@@ -552,6 +553,9 @@ def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path)
 
         def calibration_due(self):
             return self.due
+
+        def set_requested_duration(self, seconds):
+            self.requested_duration = seconds
 
         def begin_measurement(self):
             self.began = True
@@ -575,14 +579,67 @@ def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path)
 
     assert page._measurement_state == "calibrating"
     assert page._recording.kwargs["spec_version"] == 2
+    assert page._recording.kwargs["requested_duration_seconds"] == 60
+    assert page.duration_row.isHidden()
     assert "保持不動" in page.status.text()
     assert not page.continue_button.isEnabled()
     page._recording.due = True
     page._update_elapsed()
-    assert page._recording.began
-    assert page._measurement_state == "recording"
+    assert not page._recording.began
+    assert page._measurement_state == "calibration_ready"
+    assert not page.duration_row.isHidden()
+    assert page.duration_input.isEnabled()
+    assert "請輸入正式錄製時間" in page.status.text()
+    assert page.continue_button.text() == "開始正式錄製"
     assert page.continue_button.isEnabled()
+    page._primary_action()
+    assert page._recording.began
+    assert page._recording.requested_duration == 10
+    assert page._measurement_state == "recording"
+    assert not page.duration_input.isEnabled()
+    assert page.continue_button.text() == "提前結束測量"
     page.shutdown()
+
+
+def test_punch_speed_ready_state_explains_calibration_and_manual_next_step(qtbot) -> None:
+    speed_specification = next(
+        specification
+        for specification in builtin_analysis_specifications()
+        if specification.analysis_type == "punch_speed"
+        and specification.spec_version == 2
+    )
+    page = make_punch_page(qtbot, "拳頭速度")
+    page._capability_ready(AnalysisCapability(speed_specification, True))
+
+    assert "將雙手自然放下並保持不動" in page.status.text()
+    assert "校正完成後" in page.status.text()
+    assert page.continue_button.text() == "開始校正"
+    assert page.duration_row.isHidden()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "校正完成後輸入無效的正式錄製時間")
+@pytest.mark.parametrize("value", ("", "4", "3601", "1.5", "abc"))
+def test_punch_speed_rejects_invalid_duration_after_calibration(qtbot, value: str) -> None:
+    class Recording:
+        began = False
+        requested_duration = None
+
+        def set_requested_duration(self, seconds):
+            self.requested_duration = seconds
+
+        def begin_measurement(self):
+            self.began = True
+
+    page = make_punch_page(qtbot, "拳頭速度")
+    page._recording = Recording()
+    page._measurement_state = "calibration_ready"
+    page.duration_input.setText(value)
+    page._begin_formal_measurement()
+
+    assert page._measurement_state == "calibration_ready"
+    assert not page._recording.began
+    assert page._recording.requested_duration is None
+    assert "5～3600" in page.status.text()
 
 
 @pytest.mark.scenario("punch-speed-analysis", "校正期間必要 IMU 中斷")

@@ -17,7 +17,7 @@
 
 - 將 `punch_speed` 從只有 version 1 名稱與 `summary` placeholder 的待開發項目，升級為 Desktop App 與 Backend 都能執行的 version 2 分析。
 - 每次分析各使用一份 `left_wrist` 與 `right_wrist` Common IMU CSV。
-- 在正式錄製前加入簡短且有文字提示的靜止校正階段；正式 Session duration 不包含校正時間。
+- 在正式錄製前加入簡短且有文字提示的靜止校正階段；校正前與校正期間不顯示錄製時間，校正完成後才請 user 輸入正式錄製時間並按下按鈕開始錄製，因此正式 Session duration 不包含校正或等待時間。
 - Backend 依 IMU 的時間、加速度、角速度與 Quaternion，辨認每次出拳、扣除重力、修正積分漂移並計算每一拳的最高速度。
 - Backend 回傳左右手拳數、平均速度、最高速度與每一拳的速度明細；所有速度統一使用 `m/s`。
 - Desktop App 的 user-facing 名稱統一顯示「拳頭速度」，不顯示「估算手腕速度」。

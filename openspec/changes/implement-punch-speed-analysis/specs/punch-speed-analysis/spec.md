@@ -30,13 +30,21 @@
 - **AND** 不產生成功 Result
 
 ### Requirement: 正式測量前必須完成靜止校正
-Desktop App MUST 在開始記錄正式 Session duration 前顯示兩秒靜止校正，並以文字要求 user 保持預備姿勢。校正期間的 IMU samples MUST 隨正式資料保存在同一份左右手 CSV，且 Analysis Parameters MUST 標示正式測量開始的時間邊界，讓 Backend 不會把校正動作算成出拳。
+Desktop App MUST 在校正開始前，以文字清楚告訴 user 要先將雙手自然放下並保持不動。校正設定畫面與兩秒校正期間 MUST NOT 顯示正式錄製時間欄位。校正完成後，Desktop App MUST 才顯示錄製時間欄位，請 user 輸入正式 Session duration，並等待 user 按下「開始正式錄製」或意思相同的按鈕，不得自動開始正式錄製。校正期間的 IMU samples MUST 隨正式資料保存在同一份左右手 CSV，且 Analysis Parameters MUST 標示 user 按下按鈕後的正式測量開始時間邊界，讓 Backend 不會把校正或等待動作算成出拳。
 
 #### Scenario: user 完成靜止校正
-- **WHEN** user 按下「開始測量」並在兩秒校正期間保持左右手 IMU 可用
+- **WHEN** user 按下「開始校正」並在兩秒校正期間保持左右手 IMU 可用
 - **THEN** 畫面顯示「校正中，請保持預備姿勢」或意思相同的文字
-- **AND** 校正完成後才開始計算 user 指定的 Session duration
+- **AND** 校正開始前與校正期間不顯示正式錄製時間欄位
+- **AND** 校正完成後才顯示正式錄製時間欄位與「開始正式錄製」按鈕
+- **AND** user 按下該按鈕後，才開始計算 user 指定的 Session duration
 - **AND** 校正資料與正式資料使用同一條 Session-relative time 軸
+
+#### Scenario: 校正完成後輸入無效的正式錄製時間
+- **WHEN** user 在校正完成後輸入空白、非整數或不在 5～3600 秒內的正式錄製時間
+- **THEN** Desktop App 以白話說明有效範圍
+- **AND** 系統保持在校正完成狀態，不開始正式錄製
+- **AND** user 可以修正時間後再次按下「開始正式錄製」
 
 #### Scenario: 校正期間必要 IMU 中斷
 - **WHEN** 任一必要 IMU 在校正完成前中斷或沒有足夠有效資料

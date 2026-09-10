@@ -420,6 +420,11 @@ class LiveAnalysisRecording:
         )
         return self._measurement_start_elapsed_us
 
+    def set_requested_duration(self, requested_duration_seconds: int) -> None:
+        if self._measurement_started_monotonic is not None:
+            raise RecordingError("正式測量開始後不能修改錄製時間")
+        self.duration = CaptureDuration(requested_duration_seconds)
+
     def elapsed_seconds(self, *, now: float | None = None) -> float:
         if self._measurement_started_monotonic is None:
             return 0.0

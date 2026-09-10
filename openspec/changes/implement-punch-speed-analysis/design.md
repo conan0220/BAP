@@ -54,12 +54,15 @@ Backend 只為 version 2 註冊 Executor。舊 Desktop App 如果仍要求 versi
 
 ### 2. 校正與正式測量共用 CSV，但以 Parameter 分界
 
-Desktop App 在 user 按下「開始測量」後立刻建立左右手 CSV writer，流程如下：
+Desktop App 會先用白話告訴 user 校正姿勢與接下來的操作。校正設定畫面先隱藏正式錄製時間，避免 user 誤以為時間包含校正。user 按下「開始校正」後立刻建立左右手 CSV writer；兩秒校正完成時才顯示正式錄製時間欄位，讓 user 輸入時間並按下「開始正式錄製」。流程如下：
 
 ```mermaid
 flowchart LR
-    START["按下開始測量"] --> CAL["錄製兩秒校正資料<br/>顯示請保持預備姿勢"]
-    CAL --> BOUNDARY["保存 measurement_start_elapsed_us"]
+    GUIDE["顯示校正姿勢與下一步"] --> START["按下開始校正"]
+    START --> CAL["錄製兩秒校正資料<br/>顯示請保持預備姿勢"]
+    CAL --> DURATION["顯示錄製時間欄位<br/>user 輸入正式錄製秒數"]
+    DURATION --> WAIT["顯示開始正式錄製按鈕<br/>等待 user"]
+    WAIT -->|"時間有效且 user 按下按鈕"| BOUNDARY["保存 measurement_start_elapsed_us"]
     BOUNDARY --> RECORD["開始正式 Session duration"]
     RECORD --> STOP["時間到或 user 提前結束"]
     STOP --> PACKAGE["完成 CSV 與 Session package"]
@@ -217,4 +220,3 @@ Automated tests 使用答案已知的 Synthetic data，至少涵蓋：
 3. 合併後依既有 component delivery routing 部署 Backend，並產生新版 Desktop Release。
 4. 新 Desktop 只有在 Backend 回報 `punch_speed` version 2 Executor 可用時才開放測量。
 5. 若 Production smoke test 失敗，依既有 Backend release rollback；Desktop 保留上一個可用 Release。舊 Desktop 仍只要求 version 1，因此不會誤讀 version 2 Result。
-
