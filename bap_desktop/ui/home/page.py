@@ -48,13 +48,13 @@ class HomePage(QWidget):
         self.punch_grid.setSpacing(12)
         descriptions = {
             "出拳次數": "指定左、右手腕各自使用的 IMU。",
-            "出拳速度": "指定左、右手腕各自使用的 IMU。",
+            "拳頭速度": "指定左、右手腕 IMU，分析每一拳的拳頭速度。",
             "出拳力量": "所需 IMU 數量與安裝位置待決定。",
             "出拳軌跡": "指定左、右手腕各自使用的 IMU。",
             "拳種辨識": "指定持把人左右手把背面的 IMU。",
         }
         for index, item_name in enumerate(text.PUNCH_ITEMS):
-            availability = "可使用" if item_name == "出拳次數" else text.PENDING
+            availability = "可使用" if item_name in {"出拳次數", "拳頭速度"} else text.PENDING
             button = QPushButton(f"{item_name}\n{availability}｜{descriptions[item_name]}")
             button.setProperty("role", "card")
             button.setAccessibleName(f"{item_name}，{availability}")

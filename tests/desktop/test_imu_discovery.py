@@ -90,7 +90,7 @@ def test_page_requires_distinct_placement_assignments_and_shows_pending(qtbot, h
             make_result("COM2", hi91_frame, ConnectionType.WIRED),
         ],
     )
-    page = PunchItemPage("出拳速度", service)
+    page = PunchItemPage("拳頭速度", service)
     qtbot.addWidget(page)
     page.show()
     qtbot.waitUntil(lambda: len(page._source_selectors) == 2, timeout=1000)
@@ -101,7 +101,7 @@ def test_page_requires_distinct_placement_assignments_and_shows_pending(qtbot, h
     assert page.assignments["right_wrist"].port == "COM2"
     assert page.continue_button.isEnabled()
     page.continue_button.click()
-    assert page.status.text() == "出拳速度：待開發"
+    assert "Backend" in page.status.text()
     assert service.latest_result is None
 
 

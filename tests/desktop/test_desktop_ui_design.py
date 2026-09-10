@@ -91,9 +91,9 @@ def test_authenticated_shell_shows_navigation_account_and_current_page(qtbot) ->
     assert window.stack.currentWidget() is window.app_shell
     assert window.app_shell.logout_button.text() == "登出"
     assert set(window.app_shell.nav_buttons) >= {"home", "diagnostics"}
-    window.app_shell.nav_buttons["punch:出拳速度"].click()
-    assert window.app_shell.page_name.text() == "出拳速度"
-    assert window.app_shell.nav_buttons["punch:出拳速度"].isChecked()
+    window.app_shell.nav_buttons["punch:拳頭速度"].click()
+    assert window.app_shell.page_name.text() == "拳頭速度"
+    assert window.app_shell.nav_buttons["punch:拳頭速度"].isChecked()
     assert window.app_shell.content_stack.currentWidget() is window._feature_page
 
 
@@ -113,22 +113,23 @@ def test_keyboard_can_activate_navigation_and_focus_is_visually_defined(qtbot) -
 
 @pytest.mark.scenario("desktop-ui-design", "顯示待開發項目")
 @pytest.mark.scenario("desktop-app-shell", "查看拳擊測量項目")
-def test_home_has_one_available_item_and_four_pending_items(qtbot) -> None:
+def test_home_has_two_available_items_and_three_pending_items(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
 
     assert tuple(window.home_page.punch_buttons) == (
         "出拳次數",
-        "出拳速度",
+        "拳頭速度",
         "出拳力量",
         "出拳軌跡",
         "拳種辨識",
     )
     assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
+    assert "可使用" in window.home_page.punch_buttons["拳頭速度"].text()
     assert all(
         "待開發" in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name != "出拳次數"
+        if name not in {"出拳次數", "拳頭速度"}
     )
     assert not any("拳型辨識" in button.text() for button in window.home_page.punch_buttons.values())
 
@@ -140,11 +141,11 @@ def test_punch_count_page_is_not_labeled_as_pending(qtbot) -> None:
     assert page.analysis_chip.objectName() == "statusChip"
 
 
-def test_unimplemented_item_page_remains_labeled_as_pending(qtbot) -> None:
-    page = make_punch_page(qtbot, "出拳速度")
+def test_punch_speed_page_is_not_labeled_as_pending(qtbot) -> None:
+    page = make_punch_page(qtbot, "拳頭速度")
 
-    assert page.analysis_chip.text() == "分析功能待開發"
-    assert page.analysis_chip.objectName() == "pendingChip"
+    assert page.analysis_chip.text() == "可使用"
+    assert page.analysis_chip.objectName() == "statusChip"
 
 
 @pytest.mark.scenario("desktop-app-shell", "進入單一拳擊項目")
@@ -215,7 +216,7 @@ def test_single_connected_port_still_has_only_its_own_sample_rate(qtbot) -> None
 def test_each_decided_item_builds_its_required_two_placement_fields(qtbot) -> None:
     expected = {
         "出拳次數": ("左手腕", "右手腕"),
-        "出拳速度": ("左手腕", "右手腕"),
+        "拳頭速度": ("左手腕", "右手腕"),
         "出拳軌跡": ("左手腕", "右手腕"),
         "拳種辨識": ("左手把背面", "右手把背面"),
     }
@@ -239,7 +240,7 @@ def test_incomplete_assignment_keeps_continue_disabled(qtbot) -> None:
 
 @pytest.mark.scenario("imu-source-discovery", "user 將同一顆 IMU 分配給兩個位置")
 def test_duplicate_assignment_is_rejected_with_text(qtbot) -> None:
-    page = make_punch_page(qtbot, "出拳速度")
+    page = make_punch_page(qtbot, "拳頭速度")
     first, second = page._source_selectors
     first.setCurrentIndex(1)
     second.setCurrentIndex(1)
@@ -314,7 +315,7 @@ def test_minimum_window_has_resizable_scrolling_content(qtbot) -> None:
 def test_text_controls_are_not_constrained_by_fixed_heights(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
-    page = make_punch_page(qtbot, "出拳速度")
+    page = make_punch_page(qtbot, "拳頭速度")
 
     assert window.app_shell.page_name.maximumHeight() >= 16_777_215
     assert page.status.wordWrap()
@@ -456,10 +457,27 @@ def test_executable_capability_enables_start_measurement(qtbot, tmp_path: Path) 
 
 @pytest.mark.scenario("imu-source-discovery", "分析 Executor 尚未提供")
 @pytest.mark.scenario("boxing-analysis-session", "Analysis Executor 尚未提供")
+@pytest.mark.scenario("punch-speed-analysis", "Backend 尚未提供可執行 Executor")
 def test_unavailable_capability_does_not_record(qtbot) -> None:
     page = make_punch_page(qtbot, "出拳次數")
     page._capability_ready(AnalysisCapability(builtin_analysis_specifications()[0], False))
     assert "Backend 目前沒有提供" in page.status.text()
+    assert page.analysis_chip.text() == "目前無法使用"
+    assert not page.continue_button.isEnabled()
+
+
+def test_unavailable_punch_speed_names_the_correct_analysis(qtbot) -> None:
+    speed_specification = next(
+        specification
+        for specification in builtin_analysis_specifications()
+        if specification.analysis_type == "punch_speed"
+        and specification.spec_version == 2
+    )
+    page = make_punch_page(qtbot, "拳頭速度")
+    page._capability_ready(AnalysisCapability(speed_specification, False))
+
+    assert "Backend 目前沒有提供拳頭速度分析" in page.status.text()
+    assert "出拳次數分析" not in page.status.text()
     assert page.analysis_chip.text() == "目前無法使用"
     assert not page.continue_button.isEnabled()
 
@@ -508,6 +526,88 @@ def test_start_measurement_shows_elapsed_time_and_stop_action(qtbot, tmp_path: P
     assert "已錄製" in page.timer_details.text()
     assert "剩餘" in page.timer_details.text()
     page.shutdown()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "正式測量前先做兩秒靜止校正")
+@pytest.mark.scenario("punch-speed-analysis", "user 完成靜止校正")
+def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path) -> None:
+    class Recording:
+        def __init__(self, *_args, **kwargs):
+            self.kwargs = kwargs
+            self.is_calibrating = True
+            self.due = False
+            self.began = False
+
+        def start(self):
+            pass
+
+        def abort(self):
+            pass
+
+        def due_stop_reason(self):
+            return None
+
+        def calibration_remaining_seconds(self):
+            return 0.0 if self.due else 2.0
+
+        def calibration_due(self):
+            return self.due
+
+        def begin_measurement(self):
+            self.began = True
+            self.is_calibrating = False
+
+        def elapsed_seconds(self):
+            return 0.0
+
+        def remaining_seconds(self):
+            return 10.0
+
+    page = make_punch_page(qtbot, "拳頭速度")
+    page.recording_root = tmp_path
+    page.recording_factory = Recording
+    first, second = page._source_selectors
+    first.setCurrentIndex(1)
+    second.setCurrentIndex(2)
+    page._measurement_state = "ready"
+    page.duration_input.setText("10")
+    page._start_measurement()
+
+    assert page._measurement_state == "calibrating"
+    assert page._recording.kwargs["spec_version"] == 2
+    assert "保持不動" in page.status.text()
+    assert not page.continue_button.isEnabled()
+    page._recording.due = True
+    page._update_elapsed()
+    assert page._recording.began
+    assert page._measurement_state == "recording"
+    assert page.continue_button.isEnabled()
+    page.shutdown()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "校正期間必要 IMU 中斷")
+def test_punch_speed_calibration_interruption_returns_to_retry_state(qtbot) -> None:
+    from bap_common.analysis_session import SessionStopReason
+
+    class Recording:
+        aborted = False
+
+        def due_stop_reason(self):
+            return SessionStopReason.SOURCE_INTERRUPTED
+
+        def abort(self):
+            self.aborted = True
+
+    page = make_punch_page(qtbot, "拳頭速度")
+    page._recording = Recording()
+    page._measurement_state = "calibrating"
+    page._update_elapsed()
+
+    assert page._recording.aborted
+    assert page._measurement_state == "calibration_failed"
+    assert "校正期間 IMU 連線中斷" in page.status.text()
+    assert page.continue_button.text() == "重新檢測 IMU"
+    assert page.continue_button.isEnabled()
 
 
 @pytest.mark.scenario("boxing-analysis-session", "輸入無效時間")
@@ -600,6 +700,43 @@ def test_completed_result_is_rendered_with_session_identity(qtbot) -> None:
     assert "總出拳次數：5" in visible
     assert "左手：2" in visible
     assert "右手：3" in visible
+
+
+@pytest.mark.scenario("punch-speed-analysis", "Result 顯示左右手摘要與每拳速度")
+def test_completed_punch_speed_result_is_rendered_in_meters_per_second(qtbot) -> None:
+    from types import SimpleNamespace
+
+    class Flow:
+        def validate_completed(self, _payload):
+            return SimpleNamespace(
+                session_id="speed-session", analysis_id="speed-analysis",
+                result={
+                    "algorithm_version": "rule_v1",
+                    "left_punch_count": 1,
+                    "right_punch_count": 0,
+                    "total_punch_count": 1,
+                    "left_average_speed_mps": 7.25,
+                    "left_max_speed_mps": 7.25,
+                    "right_average_speed_mps": 0.0,
+                    "right_max_speed_mps": 0.0,
+                    "punches": [{
+                        "hand": "left", "punch_index": 1,
+                        "start_elapsed_us": 2_500_000,
+                        "peak_elapsed_us": 2_650_000,
+                        "end_elapsed_us": 2_800_000,
+                        "peak_speed_mps": 7.25,
+                    }],
+                },
+            )
+
+    page = make_punch_page(qtbot, "拳頭速度")
+    page.analysis_flow = Flow()
+    page._analysis_status_ready({"status": "completed"})
+    visible = " ".join(label.text() for label in page.findChildren(QLabel))
+    assert "平均拳頭速度 7.25 m/s" in visible
+    assert "最高拳頭速度 0.00 m/s" in visible
+    assert page.result_table.rowCount() == 1
+    assert page.result_table.item(0, 2).text() == "7.25 m/s"
 
 
 @pytest.mark.scenario("boxing-analysis-session", "user 在結果頁重新測量")

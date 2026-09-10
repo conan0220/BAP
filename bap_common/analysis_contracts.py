@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from enum import StrEnum
 from typing import Any, Iterable
@@ -120,6 +121,20 @@ class AnalysisSpecification(BaseModel):
         unknown = sorted(set(parameters) - set(self.parameter_names))
         if unknown:
             raise ContractError("unknown_parameter", f"未知的 Analysis Parameter：{', '.join(unknown)}")
+        if self.analysis_type == "punch_speed" and self.spec_version == 2:
+            if "measurement_start_elapsed_us" not in parameters:
+                raise ContractError(
+                    "missing_parameter", "拳頭速度缺少正式測量開始時間"
+                )
+            boundary = parameters["measurement_start_elapsed_us"]
+            if (
+                isinstance(boundary, bool)
+                or not isinstance(boundary, int)
+                or boundary <= 0
+            ):
+                raise ContractError(
+                    "invalid_parameter", "正式測量開始時間必須是大於零的整數 microseconds"
+                )
 
     def validate_result(self, result: dict[str, Any]) -> None:
         fields = {field.name: field for field in self.result_fields}
@@ -139,6 +154,84 @@ class AnalysisSpecification(BaseModel):
                 raise ContractError("invalid_result_value", "出拳次數不得小於零")
             if left is not None and right is not None and total != left + right:
                 raise ContractError("invalid_result_value", "總拳數必須等於左右手拳數相加")
+        if self.analysis_type == "punch_speed" and self.spec_version == 2:
+            _validate_punch_speed_result(result)
+
+
+def _validate_punch_speed_result(result: dict[str, Any]) -> None:
+    count_keys = ("left_punch_count", "right_punch_count", "total_punch_count")
+    speed_keys = (
+        "left_average_speed_mps",
+        "left_max_speed_mps",
+        "right_average_speed_mps",
+        "right_max_speed_mps",
+    )
+    if any(result[key] < 0 for key in count_keys):
+        raise ContractError("invalid_result_value", "拳數不得小於零")
+    if any(not math.isfinite(float(result[key])) or result[key] < 0 for key in speed_keys):
+        raise ContractError("invalid_result_value", "拳頭速度必須是非負的有限數值")
+    if result["total_punch_count"] != result["left_punch_count"] + result["right_punch_count"]:
+        raise ContractError("invalid_result_value", "總拳數必須等於左右手拳數相加")
+
+    punches = result["punches"]
+    if len(punches) != result["total_punch_count"]:
+        raise ContractError("invalid_result_value", "拳數必須與每拳明細數量一致")
+    expected_keys = {
+        "hand",
+        "punch_index",
+        "start_elapsed_us",
+        "peak_elapsed_us",
+        "end_elapsed_us",
+        "peak_speed_mps",
+    }
+    by_hand: dict[str, list[float]] = {"left": [], "right": []}
+    previous_peak = -1
+    for punch in punches:
+        if not isinstance(punch, dict) or set(punch) != expected_keys:
+            raise ContractError("invalid_result_value", "每拳明細欄位不正確")
+        hand = punch["hand"]
+        if hand not in by_hand:
+            raise ContractError("invalid_result_value", "每拳明細的手別不正確")
+        expected_index = len(by_hand[hand]) + 1
+        if (
+            isinstance(punch["punch_index"], bool)
+            or punch["punch_index"] != expected_index
+        ):
+            raise ContractError("invalid_result_value", "每隻手的拳序必須從一開始連續增加")
+        times = (
+            punch["start_elapsed_us"],
+            punch["peak_elapsed_us"],
+            punch["end_elapsed_us"],
+        )
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in times):
+            raise ContractError("invalid_result_value", "每拳明細時間必須是非負整數")
+        if not times[0] <= times[1] <= times[2]:
+            raise ContractError("invalid_result_value", "每拳明細的時間順序不正確")
+        if times[1] < previous_peak:
+            raise ContractError("invalid_result_value", "每拳明細必須依發生時間排序")
+        previous_peak = times[1]
+        speed = punch["peak_speed_mps"]
+        if (
+            isinstance(speed, bool)
+            or not isinstance(speed, (int, float))
+            or not math.isfinite(float(speed))
+            or speed < 0
+        ):
+            raise ContractError("invalid_result_value", "每拳速度必須是非負的有限數值")
+        by_hand[hand].append(float(speed))
+
+    for hand in ("left", "right"):
+        speeds = by_hand[hand]
+        if result[f"{hand}_punch_count"] != len(speeds):
+            raise ContractError("invalid_result_value", "左右手拳數必須與明細一致")
+        expected_average = round(sum(speeds) / len(speeds), 3) if speeds else 0.0
+        expected_maximum = round(max(speeds), 3) if speeds else 0.0
+        if not math.isclose(
+            float(result[f"{hand}_average_speed_mps"]), expected_average, abs_tol=0.001
+        ) or not math.isclose(
+            float(result[f"{hand}_max_speed_mps"]), expected_maximum, abs_tol=0.001
+        ):
+            raise ContractError("invalid_result_value", "拳頭速度摘要必須能由每拳明細重新算出")
 
 
 def _matches_type(value: Any, expected: ResultValueType) -> bool:
@@ -180,6 +273,24 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
             analysis_type="punch_speed", spec_version=1, display_name="出拳速度",
             input_roles=wrist_roles,
             result_fields=(ResultFieldSpecification(name="summary", value_type=ResultValueType.OBJECT),),
+        ),
+        AnalysisSpecification(
+            analysis_type="punch_speed",
+            spec_version=2,
+            display_name="拳頭速度",
+            input_roles=wrist_roles,
+            parameter_names=("measurement_start_elapsed_us",),
+            result_fields=(
+                ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="left_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="right_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="total_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="left_average_speed_mps", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="left_max_speed_mps", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="right_average_speed_mps", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="right_max_speed_mps", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="punches", value_type=ResultValueType.ARRAY),
+            ),
         ),
         AnalysisSpecification(
             analysis_type="punch_trajectory", spec_version=1, display_name="出拳軌跡",

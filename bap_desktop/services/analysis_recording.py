@@ -7,7 +7,7 @@ import json
 import shutil
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 from threading import Event, Lock
@@ -350,6 +350,9 @@ class LiveAnalysisRecording:
         except ImuCaptureError as error:
             raise RecordingError(str(error)) from error
         self.desktop_version = desktop_version
+        self.analysis_type = analysis_type
+        self.spec_version = spec_version
+        self.calibration_seconds = 2.0 if analysis_type == "punch_speed" and spec_version == 2 else 0.0
         self.duration = CaptureDuration(requested_duration_seconds)
         self.monotonic = monotonic
         self.assignments = dict(assignments)
@@ -365,30 +368,78 @@ class LiveAnalysisRecording:
         )
         self.draft = SessionDraft(self.capture.session_id, self.capture.directory)
         self._finalization_lock = Lock()
+        self._measurement_started_monotonic: float | None = None
+        self._measurement_start_elapsed_us: int | None = None
 
     def start(self) -> None:
         self.draft.begin()
         try:
             self.capture.start()
+            if self.calibration_seconds == 0:
+                self.begin_measurement()
         except BaseException:
             self.draft.fail()
             self.capture.discard()
             self.draft.close()
             raise
 
-    def elapsed_seconds(self, *, now: float | None = None) -> float:
+    @property
+    def is_calibrating(self) -> bool:
+        return self._measurement_started_monotonic is None and self.calibration_seconds > 0
+
+    def calibration_remaining_seconds(self, *, now: float | None = None) -> float:
+        if not self.is_calibrating:
+            return 0.0
         current = self.monotonic() if now is None else now
-        return self.duration.elapsed(self.capture.started_monotonic, current)
+        return max(0.0, self.calibration_seconds - (current - self.capture.started_monotonic))
+
+    def calibration_due(self, *, now: float | None = None) -> bool:
+        return self.is_calibrating and self.calibration_remaining_seconds(now=now) <= 0
+
+    def begin_measurement(self, *, now: float | None = None) -> int:
+        if self._measurement_started_monotonic is not None:
+            return self._measurement_start_elapsed_us or 0
+        current = self.monotonic() if now is None else now
+        self._measurement_started_monotonic = current
+        self._measurement_start_elapsed_us = max(
+            1, round((current - self.capture.started_monotonic) * 1_000_000)
+        )
+        parameters = (
+            {"measurement_start_elapsed_us": self._measurement_start_elapsed_us}
+            if self.analysis_type == "punch_speed" and self.spec_version == 2
+            else {}
+        )
+        self.job = build_analysis_request(
+            analysis_type=self.analysis_type,
+            spec_version=self.spec_version,
+            role_sources={
+                role: self.csv_ids[source_id(source)]
+                for role, source in self.assignments.items()
+            },
+            parameters=parameters,
+        )
+        return self._measurement_start_elapsed_us
+
+    def elapsed_seconds(self, *, now: float | None = None) -> float:
+        if self._measurement_started_monotonic is None:
+            return 0.0
+        current = self.monotonic() if now is None else now
+        return self.duration.elapsed(self._measurement_started_monotonic, current)
 
     def remaining_seconds(self, *, now: float | None = None) -> float:
+        if self._measurement_started_monotonic is None:
+            return self.duration.requested_seconds
         current = self.monotonic() if now is None else now
-        return self.duration.remaining(self.capture.started_monotonic, current)
+        return self.duration.remaining(self._measurement_started_monotonic, current)
 
     def due_stop_reason(self, *, now: float | None = None) -> SessionStopReason | None:
         current = self.monotonic() if now is None else now
         if self.capture.interrupted_sources(now=current):
             return SessionStopReason.SOURCE_INTERRUPTED
-        if self.duration.reached(self.capture.started_monotonic, current):
+        if (
+            self._measurement_started_monotonic is not None
+            and self.duration.reached(self._measurement_started_monotonic, current)
+        ):
             return SessionStopReason.DURATION_REACHED
         return None
 
@@ -401,16 +452,20 @@ class LiveAnalysisRecording:
                 return self.draft
             if self.draft.state is not RecordingState.RECORDING:
                 raise RecordingError("Session 目前不在錄製中")
+            if self._measurement_started_monotonic is None:
+                raise RecordingError("校正尚未完成，不能建立分析 Session")
             try:
+                actual_duration_seconds = max(0.000001, self.elapsed_seconds())
                 result = self.capture.stop()
+                started_at = result.ended_at - timedelta(seconds=actual_duration_seconds)
                 metadata = SessionMetadata(
                     session_id=self.draft.session_id,
                     metadata_schema_version=2,
                     desktop_version=self.desktop_version,
-                    started_at=result.started_at,
+                    started_at=started_at,
                     ended_at=result.ended_at,
                     requested_duration_seconds=self.duration.requested_seconds,
-                    actual_duration_seconds=result.actual_duration_seconds,
+                    actual_duration_seconds=actual_duration_seconds,
                     stop_reason=reason,
                     csv_files=result.descriptors,
                     analyses=(self.job,),

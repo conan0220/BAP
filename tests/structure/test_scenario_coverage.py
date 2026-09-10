@@ -32,3 +32,10 @@ def test_analysis_session_flow_scenarios_have_pytest_markers() -> None:
     assert not missing, "Missing pytest.mark.scenario links:\n" + "\n".join(
         f"- {capability}: {scenario}" for capability, scenario in missing
     )
+
+
+def test_punch_speed_analysis_scenarios_have_pytest_markers() -> None:
+    missing = sorted(missing_scenarios(ROOT, "implement-punch-speed-analysis"))
+    assert not missing, "Missing pytest.mark.scenario links:\n" + "\n".join(
+        f"- {capability}: {scenario}" for capability, scenario in missing
+    )

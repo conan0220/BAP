@@ -21,6 +21,7 @@ from bap_backend.app.services.errors import ServiceError
 from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
 from bap_backend.app.services.punch_count import PunchCountExecutor
+from bap_backend.app.services.punch_speed import PunchSpeedExecutor
 from bap_common.analysis_contracts import builtin_analysis_specifications
 
 
@@ -31,6 +32,7 @@ def _error(code: str, message: str, status_code: int) -> JSONResponse:
 def create_default_analysis_registry() -> AnalysisRegistry:
     registry = AnalysisRegistry(builtin_analysis_specifications())
     registry.register_executor("punch_count", 1, PunchCountExecutor())
+    registry.register_executor("punch_speed", 2, PunchSpeedExecutor())
     return registry
 
 
