@@ -19,6 +19,7 @@ class PunchItemDefinition:
     description: str
     placements: tuple[ImuPlacement, ...]
     configuration_decided: bool = True
+    spec_version: int = 1
 
 
 WRIST_PLACEMENTS = (
@@ -28,7 +29,13 @@ WRIST_PLACEMENTS = (
 
 PUNCH_ITEM_DEFINITIONS = {
     "出拳次數": PunchItemDefinition("出拳次數", "punch_count", "記錄左右手的出拳動作。", WRIST_PLACEMENTS),
-    "出拳速度": PunchItemDefinition("出拳速度", "punch_speed", "比較左右手的出拳速度。", WRIST_PLACEMENTS),
+    "拳頭速度": PunchItemDefinition(
+        "拳頭速度",
+        "punch_speed",
+        "指定左右手腕 IMU，計算每一拳的拳頭速度。",
+        WRIST_PLACEMENTS,
+        spec_version=2,
+    ),
     "出拳力量": PunchItemDefinition(
         "出拳力量",
         "punch_force",

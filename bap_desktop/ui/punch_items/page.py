@@ -7,6 +7,7 @@ from threading import Event
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
+    QAbstractItemView,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -14,6 +15,9 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QHeaderView,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -80,7 +84,7 @@ class PunchItemPage(QWidget):
         super().__init__(parent)
         self.item_name = item_name
         self.definition = get_punch_item_definition(item_name)
-        self._is_available_item = self.definition.analysis_type == "punch_count"
+        self._is_available_item = self.definition.analysis_type in {"punch_count", "punch_speed"}
         self.service = service or ImuDiscoveryService()
         self.analysis_flow = analysis_flow
         self.recording_root = recording_root
@@ -341,6 +345,8 @@ class PunchItemPage(QWidget):
             self._start_measurement()
         elif self._measurement_state == "recording":
             self._finish_measurement()
+        elif self._measurement_state == "calibration_failed":
+            self.start_discovery()
         elif self._measurement_state == "upload_failed":
             self._upload_and_wait()
         elif self._measurement_state == "poll_failed":
@@ -359,7 +365,9 @@ class PunchItemPage(QWidget):
         self.status.setText("正在確認 Backend 分析能力…")
         self.continue_button.setEnabled(False)
         worker = _FlowWorker(
-            lambda: self.analysis_flow.capability(self.definition.analysis_type, 1)
+            lambda: self.analysis_flow.capability(
+                self.definition.analysis_type, self.definition.spec_version
+            )
         )
         worker.signals.finished.connect(self._capability_ready)
         worker.signals.failed.connect(self._show_error)
@@ -386,7 +394,10 @@ class PunchItemPage(QWidget):
         self._clear_source_selectors()
         self.message.setVisible(False)
         if self._is_available_item:
-            self.status.setText("Backend 目前沒有提供出拳次數分析，請確認 Backend 版本與連線狀態。")
+            self.status.setText(
+                f"Backend 目前沒有提供{self.item_name}分析，"
+                "請確認 Backend 版本與連線狀態。"
+            )
             self.analysis_chip.setText("目前無法使用")
         else:
             self.status.setText(f"{self.item_name}：{text.PENDING}")
@@ -415,7 +426,7 @@ class PunchItemPage(QWidget):
                 self.recording_root,
                 assignments=self.assignments,
                 analysis_type=self.definition.analysis_type,
-                spec_version=1,
+                spec_version=self.definition.spec_version,
                 desktop_version=self.desktop_version,
                 requested_duration_seconds=requested_duration,
             )
@@ -423,19 +434,44 @@ class PunchItemPage(QWidget):
         except Exception:
             self._show_error("無法開始錄製 IMU 資料")
             return
-        self._measurement_state = "recording"
+        calibrating = bool(getattr(self._recording, "is_calibrating", False))
+        self._measurement_state = "calibrating" if calibrating else "recording"
         self._elapsed_seconds = 0
-        self.status.setText("測量中")
+        self.status.setText(
+            "校正 IMU 中，請將雙手自然放下並保持不動。"
+            if calibrating
+            else "測量中"
+        )
         self.duration_input.setEnabled(False)
         self.timer_details.setVisible(True)
         self._update_elapsed()
         self.continue_button.setText("提前結束測量")
-        self.continue_button.setEnabled(True)
+        self.continue_button.setEnabled(not calibrating)
         self._elapsed_timer.start()
 
     def _update_elapsed(self) -> None:
         recording = self._recording
-        if recording is None or self._measurement_state != "recording":
+        if recording is None or self._measurement_state not in {"calibrating", "recording"}:
+            return
+        if self._measurement_state == "calibrating":
+            reason = recording.due_stop_reason() if hasattr(recording, "due_stop_reason") else None
+            if reason is SessionStopReason.SOURCE_INTERRUPTED:
+                recording.abort()
+                self._measurement_state = "calibration_failed"
+                self._elapsed_timer.stop()
+                self.status.setText("校正期間 IMU 連線中斷，請重新檢測 IMU 後再測量。")
+                self.continue_button.setText("重新檢測 IMU")
+                self.continue_button.setEnabled(True)
+                self.duration_input.setEnabled(True)
+                return
+            remaining = float(recording.calibration_remaining_seconds())
+            self.timer_details.setText(f"校正剩餘 {remaining:.1f} 秒；請保持不動")
+            if recording.calibration_due():
+                recording.begin_measurement()
+                self._measurement_state = "recording"
+                self.status.setText("測量中")
+                self.continue_button.setEnabled(True)
+                self.timer_details.setText("已錄製 00:00｜剩餘 00:00")
             return
         if hasattr(recording, "elapsed_seconds"):
             elapsed = float(recording.elapsed_seconds())
@@ -556,14 +592,47 @@ class PunchItemPage(QWidget):
         self.continue_button.setEnabled(True)
         self.retry_button.setVisible(False)
         self._clear_source_selectors()
+        self._show_analysis_result(validated.result)
+
+    def _show_analysis_result(self, result: dict) -> None:
+        if self.definition.analysis_type == "punch_speed":
+            summaries = (
+                ("左手", "left_punch_count", "left_average_speed_mps", "left_max_speed_mps"),
+                ("右手", "right_punch_count", "right_average_speed_mps", "right_max_speed_mps"),
+            )
+            for hand, count_key, average_key, maximum_key in summaries:
+                label = QLabel(
+                    f"{hand}｜出拳 {result[count_key]} 次｜"
+                    f"平均拳頭速度 {float(result[average_key]):.2f} m/s｜"
+                    f"最高拳頭速度 {float(result[maximum_key]):.2f} m/s"
+                )
+                label.setWordWrap(True)
+                self.sources_layout.addWidget(label)
+
+            punches = list(result.get("punches", ()))
+            self.result_table = QTableWidget(len(punches), 3)
+            self.result_table.setAccessibleName("每一拳的拳頭速度")
+            self.result_table.setHorizontalHeaderLabels(("手別", "第幾拳", "最高拳頭速度"))
+            self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.result_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+            for row, punch in enumerate(punches):
+                values = (
+                    "左手" if punch["hand"] == "left" else "右手",
+                    str(punch["punch_index"]),
+                    f"{float(punch['peak_speed_mps']):.2f} m/s",
+                )
+                for column, value in enumerate(values):
+                    self.result_table.setItem(row, column, QTableWidgetItem(value))
+            self.sources_layout.addWidget(self.result_table)
+            return
+
         labels = (
             ("總出拳次數", "total_punch_count"),
             ("左手", "left_punch_count"),
             ("右手", "right_punch_count"),
         )
         for display_name, key in labels:
-            value = validated.result[key]
-            label = QLabel(f"{display_name}：{value}")
+            label = QLabel(f"{display_name}：{result[key]}")
             label.setWordWrap(True)
             self.sources_layout.addWidget(label)
 
@@ -599,5 +668,5 @@ class PunchItemPage(QWidget):
         if self._cancel_event is not None:
             self._cancel_event.set()
         self.service.clear()
-        if self._recording is not None and self._measurement_state == "recording":
+        if self._recording is not None and self._measurement_state in {"calibrating", "recording"}:
             self._recording.abort()

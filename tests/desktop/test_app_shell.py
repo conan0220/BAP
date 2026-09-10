@@ -60,20 +60,40 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
             from bap_common.analysis_contracts import builtin_analysis_specifications
             from bap_desktop.api_client.analysis import AnalysisCapability
             assert access_token == "access"
-            return (AnalysisCapability(builtin_analysis_specifications()[0], True),)
+            return tuple(
+                AnalysisCapability(specification, True)
+                for specification in builtin_analysis_specifications()
+                if (specification.analysis_type, specification.spec_version)
+                in {("punch_count", 1), ("punch_speed", 2)}
+            )
 
         def upload(self, directory, metadata, access_token: str):
             assert access_token == "access"
             assert len(metadata.csv_files) == 2
+            self.analysis_types = {
+                str(item.analysis_id): item.analysis_type for item in metadata.analyses
+            }
             return {
                 "session_id": str(metadata.session_id),
-                "analysis_ids": [str(metadata.analyses[0].analysis_id)],
+                "analysis_ids": [str(item.analysis_id) for item in metadata.analyses],
             }
 
         def analysis_status(self, session_id: str, analysis_id: str, access_token: str):
+            if self.analysis_types[analysis_id] == "punch_speed":
+                return {
+                    "status": "completed",
+                    "result": {
+                        "total_punch_count": 2,
+                        "left_max_speed_mps": 4.2,
+                    },
+                }
             return {
                 "status": "completed",
-                "result": {"left_punch_count": 1, "right_punch_count": 1, "total_punch_count": 2},
+                "result": {
+                    "left_punch_count": 1,
+                    "right_punch_count": 1,
+                    "total_punch_count": 2,
+                },
             }
 
     monkeypatch.setattr(api_client, "AuthApiClient", FakeAuthClient)
@@ -219,10 +239,11 @@ def test_successful_restore_opens_authenticated_home(qtbot) -> None:
     assert window.app_shell.content_stack.currentWidget() is window.home_page
     assert tuple(window.home_page.punch_buttons) == text.PUNCH_ITEMS
     assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
+    assert "可使用" in window.home_page.punch_buttons["拳頭速度"].text()
     assert all(
         text.PENDING in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name != "出拳次數"
+        if name not in {"出拳次數", "拳頭速度"}
     )
 
 
@@ -255,9 +276,9 @@ def test_only_one_punch_item_page_is_open_at_a_time(qtbot) -> None:
     qtbot.addWidget(window)
     window.show()
 
-    window.home_page.punch_buttons["出拳速度"].click()
+    window.home_page.punch_buttons["拳頭速度"].click()
     assert isinstance(window._feature_page, PunchItemPage)
-    assert window._feature_page.item_name == "出拳速度"
+    assert window._feature_page.item_name == "拳頭速度"
     assert window.stack.count() == 2
     assert window.app_shell.content_stack.count() == 2
 
@@ -340,5 +361,5 @@ def test_traditional_chinese_resource_keeps_domain_terms_consistent() -> None:
     )
     assert "IMU 連線狀態" in combined
     assert "Port" in combined
-    assert text.PUNCH_ITEMS == ("出拳次數", "出拳速度", "出拳力量", "出拳軌跡", "拳種辨識")
+    assert text.PUNCH_ITEMS == ("出拳次數", "拳頭速度", "出拳力量", "出拳軌跡", "拳種辨識")
     assert "拳型辨識" not in combined

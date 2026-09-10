@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import csv
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +18,7 @@ from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
 from bap_backend.app.services.analysis_sessions import AnalysisSessionService
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
 from bap_backend.app.services.punch_count import PunchCountExecutor
+from bap_backend.app.services.punch_speed import PunchSpeedExecutor
 from bap_common.analysis_contracts import builtin_analysis_specifications
 from bap_common.analysis_session import (
     AnalysisInputBinding,
@@ -27,6 +30,7 @@ from bap_common.analysis_session import (
     SourceConnectionType,
 )
 from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv_bytes, write_header
+from bap_common.imu_csv import COMMON_IMU_CSV_HEADER
 from bap_common.benchmark_bundle import load_benchmark_bundle
 from anrot_imu_driver.parsers.anrot_serial_parser import AnrotFrame
 from sqlalchemy import event, func, select
@@ -78,6 +82,65 @@ def build_package() -> tuple[SessionMetadata, dict[str, bytes]]:
     now = datetime.now(timezone.utc)
     return SessionMetadata(
         session_id=uuid4(), desktop_version="0.1.3", started_at=now, ended_at=now,
+        csv_files=tuple(descriptors), analyses=(job,),
+    ), contents
+
+
+def punch_speed_csv(amplitude_g: float = 6.0, *, valid_quaternion: bool = True) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(COMMON_IMU_CSV_HEADER)
+    quaternion = (1.0, 0.0, 0.0, 0.0) if valid_quaternion else ("", "", "", "")
+    for index in range(500):
+        acceleration = 0.0
+        gyro = 0.0
+        if 260 <= index <= 290:
+            phase = (index - 260) / 30
+            acceleration = amplitude_g * math.sin(2 * math.pi * phase)
+            gyro = 430.0
+        writer.writerow((
+            index, index, index * 10_000, index * 10, "0x63",
+            acceleration, 0.0, 1.0, gyro, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            *quaternion, "", "",
+        ))
+    return stream.getvalue().encode("utf-8")
+
+
+def build_punch_speed_package(
+    *, spec_version: int = 2, valid_quaternion: bool = True
+) -> tuple[SessionMetadata, dict[str, bytes]]:
+    contents = {
+        "left-speed.csv": punch_speed_csv(7.0, valid_quaternion=valid_quaternion),
+        "right-speed.csv": punch_speed_csv(4.0, valid_quaternion=valid_quaternion),
+    }
+    descriptors = []
+    for name, data in contents.items():
+        inspection = inspect_common_imu_csv_bytes(data)
+        descriptors.append(CsvDescriptor(
+            csv_id=uuid4(), filename=name,
+            source=ImuSourceDescriptor(
+                source_id=f"COM8:{name}", port="COM8",
+                connection_type=SourceConnectionType.WIRELESS_RECEIVER,
+                baud_rate=921600, group_id=1,
+                node_id=0 if name.startswith("left") else 1,
+            ),
+            row_count=inspection.row_count, size_bytes=inspection.size_bytes,
+            sha256=inspection.sha256,
+        ))
+    job = AnalysisJobRequest(
+        analysis_id=uuid4(), analysis_type="punch_speed", spec_version=spec_version,
+        input_bindings=(
+            AnalysisInputBinding(input_role="left_wrist", csv_id=descriptors[0].csv_id),
+            AnalysisInputBinding(input_role="right_wrist", csv_id=descriptors[1].csv_id),
+        ),
+        parameters={"measurement_start_elapsed_us": 2_000_000},
+    )
+    now = datetime.now(timezone.utc)
+    return SessionMetadata(
+        session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.14",
+        started_at=now, ended_at=now, requested_duration_seconds=5,
+        actual_duration_seconds=5.0, stop_reason=SessionStopReason.DURATION_REACHED,
         csv_files=tuple(descriptors), analyses=(job,),
     ), contents
 
@@ -373,6 +436,109 @@ def test_punch_count_data_error_is_safe_and_keeps_original_csv(tmp_path):
         assert payload["result"] is None
         assert "Traceback" not in payload["safe_error_message"]
         assert str(tmp_path) not in payload["safe_error_message"]
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+            assert all(item.csv_blob for item in session.scalars(select(ImuCsvFile)))
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "Backend 透過 Session flow 回傳拳頭速度")
+@pytest.mark.scenario("punch-speed-analysis", "Backend 回傳有效 Result")
+def test_real_punch_speed_executor_completes_over_http(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor("punch_speed", 2, PunchSpeedExecutor())
+    metadata, contents = build_punch_speed_package()
+    with client:
+        headers = authenticated(client)
+        accepted = upload(client, headers, metadata, contents)
+        assert accepted.status_code == 202
+        response = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/{metadata.analyses[0].analysis_id}",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "completed"
+        assert payload["result"]["total_punch_count"] == 2
+        assert payload["result"]["left_max_speed_mps"] > payload["result"]["right_max_speed_mps"] > 0
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "舊版速度規格不會被誤當成可執行版本")
+@pytest.mark.scenario("analysis-specification-contract", "舊 Desktop App 只要求 version 1")
+def test_punch_speed_version_one_is_not_executable(tmp_path):
+    client, _factory, engine = make_context(tmp_path, with_executor=False)
+    metadata, contents = build_punch_speed_package(spec_version=1)
+    metadata = metadata.model_copy(update={
+        "analyses": (
+            metadata.analyses[0].model_copy(update={
+                "spec_version": 1,
+                "parameters": {},
+            }),
+        )
+    })
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/{metadata.analyses[0].analysis_id}",
+            headers=headers,
+        ).json()
+        assert payload["status"] == "failed"
+        assert payload["error_code"] == "executor_unavailable"
+        assert payload["result"] is None
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "左右手輸入缺少或重複")
+@pytest.mark.parametrize("binding_mode", ("missing", "duplicate"))
+def test_punch_speed_rejects_missing_or_duplicate_role_bindings(tmp_path, binding_mode):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    metadata, contents = build_punch_speed_package()
+    original = metadata.analyses[0]
+    bindings = (
+        original.input_bindings[:1]
+        if binding_mode == "missing"
+        else (
+            original.input_bindings[0],
+            original.input_bindings[1].model_copy(
+                update={"csv_id": original.input_bindings[0].csv_id}
+            ),
+        )
+    )
+    metadata = metadata.model_copy(update={
+        "analyses": (original.model_copy(update={"input_bindings": bindings}),)
+    })
+    with client:
+        headers = authenticated(client)
+        response = upload(client, headers, metadata, contents)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] in {
+            "missing_input_role", "duplicate_csv_binding"
+        }
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(MeasurementSession)) == 0
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-speed-analysis", "無效速度資料會安全失敗並保留原始 CSV")
+def test_punch_speed_data_error_is_safe_and_keeps_original_csv(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor("punch_speed", 2, PunchSpeedExecutor())
+    metadata, contents = build_punch_speed_package(valid_quaternion=False)
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/{metadata.analyses[0].analysis_id}",
+            headers=headers,
+        ).json()
+        assert payload["status"] == "failed"
+        assert payload["error_code"] == "missing_quaternion"
+        assert payload["result"] is None
+        assert "Traceback" not in payload["safe_error_message"]
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
             assert all(item.csv_blob for item in session.scalars(select(ImuCsvFile)))

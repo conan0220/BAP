@@ -319,6 +319,90 @@ def test_live_recording_preserves_partial_wireless_data_with_source_reason(tmp_p
     assert len(draft.metadata.csv_files) == 2
 
 
+@pytest.mark.scenario("punch-speed-analysis", "校正資料與正式測量共用同一組 CSV")
+@pytest.mark.scenario("punch-speed-analysis", "正式測量時間不包含校正時間")
+def test_punch_speed_recording_adds_two_second_boundary_to_analysis_parameters(tmp_path: Path):
+    class Clock:
+        value = 10.0
+
+        def __call__(self):
+            return self.value
+
+    class FakeCapture:
+        def __init__(self, root, *, assignments, monotonic, **_kwargs):
+            self.sources = tuple(assignments.values())
+            self.session_id = uuid4()
+            self.directory = Path(root) / str(self.session_id)
+            self.csv_ids = {source_id(source): uuid4() for source in self.sources}
+            self.started_monotonic = monotonic()
+
+        def start(self):
+            self.directory.mkdir(parents=True)
+
+        def interrupted_sources(self, *, now=None):
+            return ()
+
+        def stop(self):
+            from datetime import datetime, timezone
+            from bap_desktop.services.imu_capture import ImuCaptureResult
+
+            descriptors = []
+            for source in self.sources:
+                csv_id = self.csv_ids[source_id(source)]
+                path = self.directory / f"imu_{csv_id}.csv"
+                recorder = CommonImuCsvRecorder(path)
+                recorder.__enter__()
+                recorder.append(frame(), elapsed_us=0, packet_index=0)
+                recorder.append(frame(timestamp=2), elapsed_us=7_000_000, packet_index=1)
+                inspection = recorder.finalize()
+                descriptors.append(CsvDescriptor(
+                    csv_id=csv_id, filename=path.name, source=source_descriptor(source),
+                    row_count=inspection.row_count, size_bytes=inspection.size_bytes,
+                    sha256=inspection.sha256,
+                ))
+            now = datetime.now(timezone.utc)
+            return ImuCaptureResult(
+                self.session_id, self.directory, now, now, 7.0, tuple(descriptors)
+            )
+
+        def discard(self):
+            pass
+
+    clock = Clock()
+    recording = LiveAnalysisRecording(
+        tmp_path,
+        assignments={
+            "left_wrist": ImuSource("COM5", ConnectionType.WIRED),
+            "right_wrist": ImuSource("COM6", ConnectionType.WIRED),
+        },
+        analysis_type="punch_speed",
+        spec_version=2,
+        desktop_version="0.1.14",
+        requested_duration_seconds=5,
+        monotonic=clock,
+        wall_clock=lambda: 100.0 + clock.value,
+        capture_factory=FakeCapture,
+    )
+    recording.start()
+    assert recording.is_calibrating
+    assert recording.elapsed_seconds() == 0
+    assert recording.remaining_seconds() == 5
+    clock.value = 12.0
+    assert recording.calibration_due()
+    assert recording.begin_measurement() == 2_000_000
+    assert not recording.is_calibrating
+    clock.value = 17.0
+    assert recording.due_stop_reason() is SessionStopReason.DURATION_REACHED
+    draft = recording.stop(SessionStopReason.DURATION_REACHED)
+
+    assert draft.metadata.actual_duration_seconds == 5.0
+    assert draft.metadata.requested_duration_seconds == 5
+    assert len(draft.metadata.csv_files) == 2
+    assert draft.metadata.analyses[0].parameters == {
+        "measurement_start_elapsed_us": 2_000_000
+    }
+
+
 @pytest.mark.scenario("common-imu-csv", "Session 使用不同 Port 的兩顆有線 IMU")
 @pytest.mark.scenario("common-imu-csv", "兩個有線 Port 的接收時間不同")
 @pytest.mark.scenario("common-imu-csv", "有線 IMU 沒有 Group ID 與 Node ID")

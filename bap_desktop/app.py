@@ -210,13 +210,21 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
     punch_count = next(
         item for item in capabilities if item.specification.analysis_type == "punch_count"
     )
+    punch_speed = next(
+        item
+        for item in capabilities
+        if item.specification.analysis_type == "punch_speed"
+        and item.specification.spec_version == 2
+    )
     if not punch_count.executable:
         raise RuntimeError("Production punch-count Executor is not available")
+    if not punch_speed.executable:
+        raise RuntimeError("Production punch-speed Executor version 2 is not available")
 
     def punch_csv(peak_index: int) -> bytes:
         output = io.StringIO(newline="")
         writer = write_header(output)
-        for index in range(300):
+        for index in range(500):
             distance = abs(index - peak_index)
             amplitude = {0: 7.0, 1: 4.0, 2: 1.0}.get(distance, 0.0)
             frame = AnrotFrame()
@@ -240,7 +248,7 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="bap-installed-e2e-") as temp:
         root = Path(temp)
         descriptors = []
-        for name, peak_index in (("left.csv", 100), ("right.csv", 105)):
+        for name, peak_index in (("left.csv", 260), ("right.csv", 265)):
             data = punch_csv(peak_index)
             (root / name).write_bytes(data)
             inspected = inspect_common_imu_csv_bytes(data)
@@ -253,12 +261,20 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
                 row_count=inspected.row_count, size_bytes=inspected.size_bytes,
                 sha256=inspected.sha256,
             ))
-        job = AnalysisJobRequest(
+        count_job = AnalysisJobRequest(
             analysis_id=uuid4(), analysis_type="punch_count", spec_version=1,
             input_bindings=(
                 AnalysisInputBinding(input_role="left_wrist", csv_id=descriptors[0].csv_id),
                 AnalysisInputBinding(input_role="right_wrist", csv_id=descriptors[1].csv_id),
             ),
+        )
+        speed_job = AnalysisJobRequest(
+            analysis_id=uuid4(), analysis_type="punch_speed", spec_version=2,
+            input_bindings=(
+                AnalysisInputBinding(input_role="left_wrist", csv_id=descriptors[0].csv_id),
+                AnalysisInputBinding(input_role="right_wrist", csv_id=descriptors[1].csv_id),
+            ),
+            parameters={"measurement_start_elapsed_us": 2_000_000},
         )
         now = datetime.now(timezone.utc)
         metadata = SessionMetadata(
@@ -267,19 +283,30 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
             requested_duration_seconds=5,
             actual_duration_seconds=3.0,
             stop_reason=SessionStopReason.ENDED_BY_USER,
-            csv_files=tuple(descriptors), analyses=(job,),
+            csv_files=tuple(descriptors), analyses=(count_job, speed_job),
         )
         report("upload_session")
         accepted = analysis.upload(root, metadata, tokens.access_token)
         report("analysis_status")
-        result = _wait_for_api_e2e_analysis(
+        count_result = _wait_for_api_e2e_analysis(
             analysis,
             accepted["session_id"],
-            accepted["analysis_ids"][0],
+            str(count_job.analysis_id),
             tokens.access_token,
         )
-        if result.get("result", {}).get("total_punch_count") != 2:
+        if count_result.get("result", {}).get("total_punch_count") != 2:
             raise RuntimeError("installed Desktop Session-to-Result E2E returned an unexpected Result")
+        speed_result = _wait_for_api_e2e_analysis(
+            analysis,
+            accepted["session_id"],
+            str(speed_job.analysis_id),
+            tokens.access_token,
+        )
+        speed_payload = speed_result.get("result", {})
+        if speed_payload.get("total_punch_count") != 2:
+            raise RuntimeError("installed Desktop punch-speed E2E returned an unexpected count")
+        if not float(speed_payload.get("left_max_speed_mps", 0)) > 0:
+            raise RuntimeError("installed Desktop punch-speed E2E returned no positive speed")
     report("refresh_token")
     refreshed = auth.refresh(tokens.refresh_token)
     report("logout")

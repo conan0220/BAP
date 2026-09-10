@@ -144,6 +144,14 @@ def _is_forward_time_axis(values: list[int]) -> bool:
 def count_single_wrist_punches(
     samples: tuple[ImuSample, ...], *, config: RuleV1Config = RULE_V1
 ) -> int:
+    return len(detect_single_wrist_punch_peaks(samples, config=config))
+
+
+def detect_single_wrist_punch_peaks(
+    samples: tuple[ImuSample, ...], *, config: RuleV1Config = RULE_V1
+) -> tuple[int, ...]:
+    """Return the same event peaks historically used by punch-count rule_v1."""
+
     if len(samples) < 3:
         raise PunchCountDataError(
             "insufficient_imu_samples", "IMU 資料筆數不足，無法計算出拳次數"
@@ -163,11 +171,7 @@ def count_single_wrist_punches(
         baseline_magnitudes = [_acc_magnitude(sample) for sample in samples[:3]]
     baseline_gravity = statistics.median(baseline_magnitudes)
 
-    scores = [
-        abs(_acc_magnitude(sample) - baseline_gravity)
-        + _gyro_magnitude(sample) / config.gyro_scale_dps
-        for sample in samples
-    ]
+    scores = motion_scores(samples, baseline_gravity=baseline_gravity, config=config)
     window = max(
         config.minimum_smoothing_samples,
         round(sample_rate * config.smoothing_seconds),
@@ -194,7 +198,44 @@ def count_single_wrist_punches(
             episode_peaks.append(index)
         elif value > smoothed[previous]:
             episode_peaks[-1] = index
-    return len(episode_peaks)
+    return tuple(episode_peaks)
+
+
+def smoothed_motion_scores(
+    samples: tuple[ImuSample, ...], *, config: RuleV1Config = RULE_V1
+) -> tuple[float, ...]:
+    """Expose the versioned score used to expand peaks into speed windows."""
+
+    duration = samples[-1].time_seconds - samples[0].time_seconds
+    if duration <= 0:
+        raise PunchCountDataError("invalid_time_axis", "IMU 資料的時間沒有前進")
+    sample_rate = (len(samples) - 1) / duration
+    baseline_limit = samples[0].time_seconds + config.baseline_seconds
+    baseline_magnitudes = [
+        _acc_magnitude(sample)
+        for sample in samples
+        if sample.time_seconds <= baseline_limit
+    ]
+    if len(baseline_magnitudes) < 3:
+        baseline_magnitudes = [_acc_magnitude(sample) for sample in samples[:3]]
+    baseline_gravity = statistics.median(baseline_magnitudes)
+    window = max(config.minimum_smoothing_samples, round(sample_rate * config.smoothing_seconds))
+    return tuple(
+        _moving_average(
+            motion_scores(samples, baseline_gravity=baseline_gravity, config=config),
+            window,
+        )
+    )
+
+
+def motion_scores(
+    samples: tuple[ImuSample, ...], *, baseline_gravity: float, config: RuleV1Config
+) -> list[float]:
+    return [
+        abs(_acc_magnitude(sample) - baseline_gravity)
+        + _gyro_magnitude(sample) / config.gyro_scale_dps
+        for sample in samples
+    ]
 
 
 def _moving_average(values: list[float], window: int) -> list[float]:

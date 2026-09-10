@@ -14,6 +14,7 @@ from bap_common.analysis_contracts import (
     InputRoleSpecification,
     ResultFieldSpecification,
     ResultValueType,
+    builtin_analysis_specifications,
 )
 from bap_common.analysis_session import (
     AnalysisInputBinding,
@@ -212,3 +213,92 @@ def test_common_csv_rejects_unknown_schema_header_index_and_reversed_time() -> N
     rows[1][2] = 11
     with pytest.raises(CommonImuCsvError, match="sample_index"):
         inspect_common_imu_csv_bytes(csv_bytes(rows))
+
+
+def punch_speed_specification(version: int = 2) -> AnalysisSpecification:
+    return next(
+        item
+        for item in builtin_analysis_specifications()
+        if item.analysis_type == "punch_speed" and item.spec_version == version
+    )
+
+
+def valid_punch_speed_result() -> dict:
+    return {
+        "algorithm_version": "rule_v1",
+        "left_punch_count": 1,
+        "right_punch_count": 1,
+        "total_punch_count": 2,
+        "left_average_speed_mps": 4.5,
+        "left_max_speed_mps": 4.5,
+        "right_average_speed_mps": 5.25,
+        "right_max_speed_mps": 5.25,
+        "punches": [
+            {
+                "hand": "left",
+                "punch_index": 1,
+                "start_elapsed_us": 2_100_000,
+                "peak_elapsed_us": 2_250_000,
+                "end_elapsed_us": 2_500_000,
+                "peak_speed_mps": 4.5,
+            },
+            {
+                "hand": "right",
+                "punch_index": 1,
+                "start_elapsed_us": 2_600_000,
+                "peak_elapsed_us": 2_750_000,
+                "end_elapsed_us": 3_000_000,
+                "peak_speed_mps": 5.25,
+            },
+        ],
+    }
+
+
+@pytest.mark.scenario("analysis-specification-contract", "Backend 回傳完整拳頭速度 Result")
+def test_punch_speed_v2_contract_accepts_complete_result_and_parameter() -> None:
+    specification = punch_speed_specification()
+    assert specification.display_name == "拳頭速度"
+    specification.validate_parameters({"measurement_start_elapsed_us": 2_000_000})
+    specification.validate_result(valid_punch_speed_result())
+
+
+@pytest.mark.scenario("analysis-specification-contract", "Result 仍使用舊的 summary placeholder")
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"summary": {}},
+        {**valid_punch_speed_result(), "left_punch_count": 2},
+        {
+            **valid_punch_speed_result(),
+            "punches": [
+                {**valid_punch_speed_result()["punches"][0], "hand": "unknown"},
+                valid_punch_speed_result()["punches"][1],
+            ],
+        },
+        {
+            **valid_punch_speed_result(),
+            "punches": [
+                {**valid_punch_speed_result()["punches"][0], "peak_speed_mps": float("nan")},
+                valid_punch_speed_result()["punches"][1],
+            ],
+        },
+    ),
+)
+def test_punch_speed_v2_contract_rejects_placeholder_and_invalid_semantics(payload) -> None:
+    with pytest.raises(ContractError):
+        punch_speed_specification().validate_result(payload)
+
+
+@pytest.mark.scenario("analysis-specification-contract", "Result 內的摘要與明細不一致")
+def test_punch_speed_v2_contract_rejects_inconsistent_summary() -> None:
+    payload = valid_punch_speed_result()
+    payload["left_average_speed_mps"] = 99.0
+    with pytest.raises(ContractError, match="摘要"):
+        punch_speed_specification().validate_result(payload)
+
+
+def test_punch_speed_v2_contract_requires_valid_measurement_boundary() -> None:
+    specification = punch_speed_specification()
+    for parameters in ({}, {"measurement_start_elapsed_us": 0}, {"measurement_start_elapsed_us": True}):
+        with pytest.raises(ContractError):
+            specification.validate_parameters(parameters)
