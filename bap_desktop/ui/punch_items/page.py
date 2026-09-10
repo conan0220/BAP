@@ -343,6 +343,8 @@ class PunchItemPage(QWidget):
             self._prepare_session()
         elif self._measurement_state == "ready":
             self._start_measurement()
+        elif self._measurement_state == "calibration_ready":
+            self._begin_formal_measurement()
         elif self._measurement_state == "recording":
             self._finish_measurement()
         elif self._measurement_state == "calibration_failed":
@@ -380,13 +382,23 @@ class PunchItemPage(QWidget):
             return
         self._clear_source_selectors()
         self.message.setVisible(False)
-        self.status.setText("IMU 已準備完成，按下「開始測量」後才會建立正式 CSV。")
+        if self.definition.analysis_type == "punch_speed":
+            self.status.setText(
+                "下一步：將雙手自然放下並保持不動，再按「開始校正」。"
+                "系統會校正兩秒；校正完成後，再由你按按鈕開始正式錄製。"
+            )
+        else:
+            self.status.setText("IMU 已準備完成，按下「開始測量」後才會建立正式 CSV。")
         self.analysis_chip.setText("準備測量")
         self._measurement_state = "ready"
-        self.continue_button.setText("開始測量")
+        self.continue_button.setText(
+            "開始校正"
+            if self.definition.analysis_type == "punch_speed"
+            else "開始測量"
+        )
         self.continue_button.setEnabled(True)
         self.retry_button.setVisible(False)
-        self.duration_row.setVisible(True)
+        self.duration_row.setVisible(self.definition.analysis_type != "punch_speed")
         self.timer_details.setVisible(False)
         self.service.clear()
 
@@ -410,17 +422,16 @@ class PunchItemPage(QWidget):
         if self.recording_root is None:
             self._show_error("本機 Session 暫存位置尚未設定")
             return
-        try:
-            raw_duration = self.duration_input.text().strip()
-            if not raw_duration or not raw_duration.isdecimal():
-                raise ValueError
-            requested_duration = int(raw_duration)
-            if not 5 <= requested_duration <= 3600:
-                raise ValueError
-        except ValueError:
-            self.status.setText("錄製時間必須是 5～3600 之間的整數秒。")
-            self.duration_input.setFocus()
-            return
+        if self.definition.analysis_type == "punch_speed":
+            # 校正尚未完成時不要求 user 決定正式錄製時間。這個值只用來建立
+            # 暫存錄製物件，正式時間會在 user 按下「開始正式錄製」時覆寫。
+            requested_duration = 60
+        else:
+            try:
+                requested_duration = self._requested_duration()
+            except ValueError:
+                self._show_invalid_duration()
+                return
         try:
             self._recording = self.recording_factory(
                 self.recording_root,
@@ -451,9 +462,11 @@ class PunchItemPage(QWidget):
 
     def _update_elapsed(self) -> None:
         recording = self._recording
-        if recording is None or self._measurement_state not in {"calibrating", "recording"}:
+        if recording is None or self._measurement_state not in {
+            "calibrating", "calibration_ready", "recording"
+        }:
             return
-        if self._measurement_state == "calibrating":
+        if self._measurement_state in {"calibrating", "calibration_ready"}:
             reason = recording.due_stop_reason() if hasattr(recording, "due_stop_reason") else None
             if reason is SessionStopReason.SOURCE_INTERRUPTED:
                 recording.abort()
@@ -464,14 +477,19 @@ class PunchItemPage(QWidget):
                 self.continue_button.setEnabled(True)
                 self.duration_input.setEnabled(True)
                 return
-            remaining = float(recording.calibration_remaining_seconds())
-            self.timer_details.setText(f"校正剩餘 {remaining:.1f} 秒；請保持不動")
-            if recording.calibration_due():
-                recording.begin_measurement()
-                self._measurement_state = "recording"
-                self.status.setText("測量中")
+            if self._measurement_state == "calibrating":
+                remaining = float(recording.calibration_remaining_seconds())
+                self.timer_details.setText(f"校正剩餘 {remaining:.1f} 秒；請保持不動")
+            if self._measurement_state == "calibrating" and recording.calibration_due():
+                self._measurement_state = "calibration_ready"
+                self.status.setText(
+                    "校正完成。請輸入正式錄製時間，再按「開始正式錄製」。"
+                )
+                self.timer_details.setText("校正完成｜正式錄製尚未開始")
+                self.duration_input.setEnabled(True)
+                self.duration_row.setVisible(True)
+                self.continue_button.setText("開始正式錄製")
                 self.continue_button.setEnabled(True)
-                self.timer_details.setText("已錄製 00:00｜剩餘 00:00")
             return
         if hasattr(recording, "elapsed_seconds"):
             elapsed = float(recording.elapsed_seconds())
@@ -490,6 +508,47 @@ class PunchItemPage(QWidget):
             reason = recording.due_stop_reason()
             if reason is not None:
                 self._finish_measurement(reason)
+
+    def _begin_formal_measurement(self) -> None:
+        recording = self._recording
+        if recording is None or self._measurement_state != "calibration_ready":
+            return
+        try:
+            requested_duration = self._requested_duration()
+        except ValueError:
+            self._show_invalid_duration()
+            return
+        try:
+            recording.set_requested_duration(requested_duration)
+            recording.begin_measurement()
+        except Exception:
+            recording.abort()
+            self._measurement_state = "calibration_failed"
+            self._elapsed_timer.stop()
+            self.status.setText("無法開始正式錄製，請重新檢測 IMU 後再測量。")
+            self.continue_button.setText("重新檢測 IMU")
+            self.continue_button.setEnabled(True)
+            self.duration_input.setEnabled(True)
+            return
+        self._measurement_state = "recording"
+        self.status.setText("測量中")
+        self.duration_input.setEnabled(False)
+        self.timer_details.setText("已錄製 00:00｜剩餘 00:00")
+        self.continue_button.setText("提前結束測量")
+        self.continue_button.setEnabled(True)
+
+    def _requested_duration(self) -> int:
+        raw_duration = self.duration_input.text().strip()
+        if not raw_duration or not raw_duration.isdecimal():
+            raise ValueError
+        requested_duration = int(raw_duration)
+        if not 5 <= requested_duration <= 3600:
+            raise ValueError
+        return requested_duration
+
+    def _show_invalid_duration(self) -> None:
+        self.status.setText("錄製時間必須是 5～3600 之間的整數秒。")
+        self.duration_input.setFocus()
 
     def _finish_measurement(
         self,
@@ -668,5 +727,7 @@ class PunchItemPage(QWidget):
         if self._cancel_event is not None:
             self._cancel_event.set()
         self.service.clear()
-        if self._recording is not None and self._measurement_state in {"calibrating", "recording"}:
+        if self._recording is not None and self._measurement_state in {
+            "calibrating", "calibration_ready", "recording"
+        }:
             self._recording.abort()
