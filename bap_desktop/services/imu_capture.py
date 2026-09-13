@@ -24,6 +24,40 @@ class ImuCaptureError(RuntimeError):
 SOURCE_INTERRUPTION_TIMEOUT_SECONDS = 1.0
 
 
+class GatewayPacketIndexer:
+    """Assign one increasing index to each physical Gateway packet.
+
+    Gateway timestamps are device clocks, not packet identifiers: the device may
+    emit two different packets with the same timestamp.  Parsed 0x63 frames carry
+    ``node_index``/``node_count``, so node zero is the reliable packet boundary.
+    The timestamp fallback only supports legacy or synthetic frames that do not
+    expose their node position.
+    """
+
+    def __init__(self) -> None:
+        self._next_index = 0
+        self._current_index: int | None = None
+        self._legacy_indexes: dict[int, int] = {}
+
+    def observe(self, frame, *, fallback_key: int) -> int:
+        node_index = getattr(frame, "node_index", None)
+        if node_index is not None:
+            if int(node_index) == 0 or self._current_index is None:
+                self._current_index = self._allocate()
+            return self._current_index
+
+        timestamp = getattr(frame, "gw_ts_ms", None)
+        key = int(timestamp if timestamp is not None else fallback_key)
+        if key not in self._legacy_indexes:
+            self._legacy_indexes[key] = self._allocate()
+        return self._legacy_indexes[key]
+
+    def _allocate(self) -> int:
+        value = self._next_index
+        self._next_index += 1
+        return value
+
+
 @dataclass(frozen=True, slots=True)
 class CaptureDuration:
     requested_seconds: int = 60
@@ -144,7 +178,7 @@ class LiveImuCapture:
 
     def _read_port(self, port: str, connection) -> None:
         parser = AnrotSerialParser()
-        packet_numbers: dict[int, int] = {}
+        gateway_packets = GatewayPacketIndexer()
         wired_packet_index = 0
         try:
             while not self._stop.is_set():
@@ -156,6 +190,11 @@ class LiveImuCapture:
                 observed_at = self.monotonic()
                 elapsed_us = round(max(0.0, observed_at - self._started_monotonic) * 1_000_000)
                 for frame in frames:
+                    gateway_packet_index = (
+                        gateway_packets.observe(frame, fallback_key=elapsed_us)
+                        if frame.frame_type == 0x63
+                        else None
+                    )
                     for source in self.sources:
                         if source.port != port:
                             continue
@@ -167,10 +206,7 @@ class LiveImuCapture:
                         else:
                             if frame.gw_id != source.group_id or frame.node_id != source.node_id:
                                 continue
-                            key = int(frame.gw_ts_ms or elapsed_us)
-                            if key not in packet_numbers:
-                                packet_numbers[key] = len(packet_numbers)
-                            packet_index = packet_numbers[key]
+                            packet_index = gateway_packet_index
                         identity = self._source_id(source)
                         self._recorders[identity].append(
                             frame, elapsed_us=elapsed_us, packet_index=packet_index

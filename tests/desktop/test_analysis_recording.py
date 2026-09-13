@@ -22,7 +22,7 @@ from bap_desktop.services.analysis_recording import (
     source_id,
     source_descriptor,
 )
-from helpers import build_hi91_frame
+from helpers import build_gateway_frame, build_gateway_node, build_hi91_frame
 from bap_desktop.services.imu_discovery import ImuSource
 from bap_desktop.services.imu_scan import (
     ConnectionType,
@@ -40,12 +40,14 @@ class FakeAdapter:
         raise AssertionError("fake scan should be injected")
 
 
-def frame(*, node_id=None, gw_id=None, timestamp=1, value=1.0):
+def frame(*, node_id=None, gw_id=None, timestamp=1, value=1.0, node_index=None, node_count=None):
     item = AnrotFrame()
     item.frame_type = 0x63 if node_id is not None else 0x91
     item.node_id = node_id
     item.gw_id = gw_id
     item.gw_ts_ms = timestamp if node_id is not None else None
+    item.node_index = node_index
+    item.node_count = node_count
     item.system_time_ms = timestamp
     item.acc = (value, value + 1, value + 2)
     item.gyr = (3.0, 4.0, 5.0)
@@ -199,6 +201,108 @@ def test_live_recording_starts_and_stops_with_new_session_ids(tmp_path: Path):
     assert first_draft.metadata.stop_reason is SessionStopReason.ENDED_BY_USER
     assert first_draft.session_id != second.draft.session_id
     assert all(item.closed for item in adapter.connections)
+
+
+@pytest.mark.scenario("common-imu-csv", "Gateway 裝置時間重複但封包內容不同")
+def test_live_wireless_recording_uses_packet_boundaries_not_gateway_timestamp(tmp_path: Path):
+    first_packet = build_gateway_frame(
+        gateway_id=7,
+        timestamp_ms=123456,
+        nodes=(build_gateway_node(1, acc=(100, 200, 300)), build_gateway_node(2, acc=(400, 500, 600))),
+    )
+    second_packet = build_gateway_frame(
+        gateway_id=7,
+        timestamp_ms=123456,
+        nodes=(build_gateway_node(1, acc=(700, 800, 900)), build_gateway_node(2, acc=(1000, 1100, 1200))),
+    )
+
+    class Connection:
+        def __init__(self):
+            self.data = first_packet + second_packet
+
+        @property
+        def in_waiting(self):
+            return len(self.data)
+
+        def read(self, _size=1):
+            data, self.data = self.data, b""
+            return data
+
+        def close(self):
+            pass
+
+    class Adapter:
+        def open(self, *_args, **_kwargs):
+            return Connection()
+
+    recording = LiveAnalysisRecording(
+        tmp_path,
+        assignments={
+            "left_pad": ImuSource("COM1", ConnectionType.WIRELESS_RECEIVER, 7, 1),
+            "right_pad": ImuSource("COM1", ConnectionType.WIRELESS_RECEIVER, 7, 2),
+        },
+        analysis_type="punch_classification",
+        spec_version=1,
+        desktop_version="0.1.18",
+        adapter=Adapter(),
+    )
+    recording.start()
+    import time
+    time.sleep(0.02)
+    draft = recording.stop()
+
+    import csv
+    for descriptor in draft.metadata.csv_files:
+        with (draft.directory / descriptor.filename).open(encoding="utf-8", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        assert [int(row["packet_index"]) for row in rows] == [0, 1]
+        assert [int(row["device_time_ms"]) for row in rows] == [123456, 123456]
+
+
+@pytest.mark.scenario("common-imu-csv", "批次錄製依 Gateway 封包邊界編號")
+def test_batch_wireless_recording_uses_packet_boundaries_when_timestamp_repeats(tmp_path: Path):
+    sources = (
+        ImuSource("COM1", ConnectionType.WIRELESS_RECEIVER, 7, 1),
+        ImuSource("COM1", ConnectionType.WIRELESS_RECEIVER, 7, 2),
+    )
+    frames = [
+        frame(node_id=1, gw_id=7, timestamp=10, value=1, node_index=0, node_count=2),
+        frame(node_id=2, gw_id=7, timestamp=10, value=2, node_index=1, node_count=2),
+        frame(node_id=1, gw_id=7, timestamp=10, value=3, node_index=0, node_count=2),
+        frame(node_id=2, gw_id=7, timestamp=10, value=4, node_index=1, node_count=2),
+    ]
+
+    def fake_scan(_adapter, **_kwargs):
+        return [PortScanResult(
+            port="COM1", manufacturer="ANROT", baud_rate=921600,
+            started_at=0, ended_at=1, frames=frames,
+            frame_timestamps=[100.0, 100.0, 100.1, 100.1], status=ScanStatus.CONNECTED,
+            connection_type=ConnectionType.WIRELESS_RECEIVER, group_id=7, node_ids=(1, 2),
+        )]
+
+    csv_ids = {
+        "COM1:group-7:node-1": uuid4(),
+        "COM1:group-7:node-2": uuid4(),
+    }
+    analysis = AnalysisJobRequest(
+        analysis_id=uuid4(), analysis_type="punch_classification", spec_version=1,
+        input_bindings=(
+            AnalysisInputBinding(input_role="left_pad", csv_id=csv_ids["COM1:group-7:node-1"]),
+            AnalysisInputBinding(input_role="right_pad", csv_id=csv_ids["COM1:group-7:node-2"]),
+        ),
+    )
+    recorder = AnalysisSessionRecorder(tmp_path, adapter=FakeAdapter(), scan=fake_scan, clock=lambda: 100.0)
+    draft = recorder.record(
+        sources=sources, analyses=(analysis,), desktop_version="0.1.18", duration_seconds=1,
+        csv_ids_by_source=csv_ids,
+    )
+
+    import csv
+    for descriptor in draft.metadata.csv_files:
+        with (draft.directory / descriptor.filename).open(encoding="utf-8", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        assert [int(row["packet_index"]) for row in rows] == [0, 1]
+        assert [int(row["device_time_ms"]) for row in rows] == [10, 10]
 
 
 @pytest.mark.scenario("boxing-analysis-session", "預定時間到達")
