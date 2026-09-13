@@ -919,7 +919,26 @@ def test_invalid_result_is_not_shown_as_success(qtbot) -> None:
     page.analysis_flow = Flow()
     page._analysis_status_ready({"status": "completed"})
     assert "格式不正確" in page.status.text()
-    assert page._measurement_state == "failed"
+    assert page._measurement_state == "analysis_failed"
+    assert page.continue_button.text() == "重新測量"
+    assert page.continue_button.isEnabled()
+
+
+def test_backend_analysis_failure_offers_restart(qtbot) -> None:
+    page = make_punch_page(qtbot, "拳種辨識")
+    page._analysis_status_ready({
+        "status": "failed",
+        "safe_error_message": "IMU 資料需要重新測量",
+    })
+
+    assert page._measurement_state == "analysis_failed"
+    assert page.status.text() == "IMU 資料需要重新測量"
+    assert page.analysis_chip.text() == "分析失敗"
+    assert page.continue_button.text() == "重新測量"
+    assert page.continue_button.isEnabled()
+
+    page.continue_button.click()
+    assert page._measurement_state == "assigning"
 
 
 @pytest.mark.scenario("desktop-ui-design", "上傳時網路中斷")

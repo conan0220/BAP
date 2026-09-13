@@ -150,7 +150,7 @@ def _read_rows(data: bytes) -> list[dict[str, Any]]:
     except UnicodeDecodeError as error:
         raise ContractError("invalid_csv_encoding", "CSV 必須使用 UTF-8") from error
     parsed: list[dict[str, Any]] = []
-    seen: set[tuple[int, int]] = set()
+    seen: dict[tuple[int, int], tuple[float, ...]] = {}
     previous_packet = -1
     previous_device = -1
     previous_elapsed = -1
@@ -165,11 +165,6 @@ def _read_rows(data: bytes) -> list[dict[str, Any]]:
             raise ContractError(
                 "missing_sync_key", f"CSV 第 {row_number} 列缺少可用的同步識別"
             ) from error
-        key = (packet, device)
-        if key in seen:
-            raise ContractError("duplicate_sync_key", "CSV 含有重複的 Gateway packet 與裝置時間")
-        if packet < previous_packet or device < previous_device or elapsed < previous_elapsed:
-            raise ContractError("time_axis_reversed", "IMU packet 或時間發生倒退")
         values: list[float] = []
         for column in SENSOR_COLUMNS:
             try:
@@ -183,8 +178,23 @@ def _read_rows(data: bytes) -> list[dict[str, Any]]:
                     "invalid_sensor_value", f"CSV 第 {row_number} 列包含非有限 sensor 數值"
                 )
             values.append(value)
+        key = (packet, device)
+        values_tuple = tuple(values)
+        previous_values = seen.get(key)
+        if previous_values is not None:
+            if previous_values == values_tuple:
+                # A wireless receiver can occasionally repeat the same packet.
+                # Keep the first observation so Node1/Node2 still have one
+                # unambiguous row for this synchronization key.
+                continue
+            raise ContractError(
+                "conflicting_duplicate_sync_key",
+                "相同的 Gateway packet 與裝置時間包含不同 IMU 資料，請重新測量",
+            )
+        if packet < previous_packet or device < previous_device or elapsed < previous_elapsed:
+            raise ContractError("time_axis_reversed", "IMU packet 或時間發生倒退")
         parsed.append({"key": key, "elapsed_us": elapsed, "values": values})
-        seen.add(key)
+        seen[key] = values_tuple
         previous_packet, previous_device, previous_elapsed = packet, device, elapsed
     return parsed
 
