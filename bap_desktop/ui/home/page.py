@@ -56,7 +56,7 @@ class HomePage(QWidget):
         for index, item_name in enumerate(text.PUNCH_ITEMS):
             availability = (
                 "可使用"
-                if item_name in {"出拳次數", "拳頭速度", "拳種辨識"}
+                if item_name in {"出拳次數", "拳頭速度", "出拳軌跡", "拳種辨識"}
                 else text.PENDING
             )
             button = QPushButton(f"{item_name}\n{availability}｜{descriptions[item_name]}")

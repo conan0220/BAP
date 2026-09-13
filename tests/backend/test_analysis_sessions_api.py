@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import csv
+import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from bap_backend.app.services.analysis_sessions import AnalysisSessionService
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
 from bap_backend.app.services.punch_count import PunchCountExecutor
 from bap_backend.app.services.punch_speed import PunchSpeedExecutor
+from bap_backend.app.services.punch_trajectory import PunchTrajectoryExecutor
 from bap_backend.app.services.punch_classification import (
     PunchClassificationExecutor,
     PunchClassificationModelBundle,
@@ -148,6 +150,16 @@ def build_punch_speed_package(
         actual_duration_seconds=5.0, stop_reason=SessionStopReason.DURATION_REACHED,
         csv_files=tuple(descriptors), analyses=(job,),
     ), contents
+
+
+def build_punch_trajectory_package(
+    *, valid_quaternion: bool = True
+) -> tuple[SessionMetadata, dict[str, bytes]]:
+    metadata, contents = build_punch_speed_package(valid_quaternion=valid_quaternion)
+    job = metadata.analyses[0].model_copy(
+        update={"analysis_type": "punch_trajectory", "spec_version": 2}
+    )
+    return metadata.model_copy(update={"analyses": (job,)}), contents
 
 
 def punch_classification_csv(node_id: int) -> bytes:
@@ -519,6 +531,131 @@ def test_real_punch_speed_executor_completes_over_http(tmp_path):
         assert payload["result"]["left_max_speed_mps"] > payload["result"]["right_max_speed_mps"] > 0
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "Backend 回傳一拳的有效軌跡")
+@pytest.mark.scenario("punch-trajectory-analysis", "Backend 回傳一拳的有效軌跡")
+def test_real_punch_trajectory_executor_completes_over_http_and_preserves_csv(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor(
+        "punch_trajectory", 2, PunchTrajectoryExecutor()
+    )
+    metadata, contents = build_punch_trajectory_package()
+    original_hashes = {name: inspect_common_imu_csv_bytes(data).sha256 for name, data in contents.items()}
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/"
+            f"{metadata.analyses[0].analysis_id}", headers=headers,
+        ).json()
+        assert payload["status"] == "completed"
+        assert payload["result"]["total_punch_count"] == 2
+        assert payload["result"]["coordinate_system"] == "session_local_x_right_y_forward_z_up"
+        with factory() as session:
+            job = session.get(AnalysisJob, str(metadata.analyses[0].analysis_id))
+            assert json.loads(job.result.result_json) == payload["result"]
+            saved = tuple(session.scalars(select(ImuCsvFile)))
+            assert len(saved) == 2
+            assert {
+                item.filename: inspect_common_imu_csv_bytes(item.csv_blob).sha256 for item in saved
+            } == original_hashes
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "CSV 缺少有效 Quaternion")
+def test_trajectory_failure_keeps_csv_and_retry_reuses_saved_inputs(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor(
+        "punch_trajectory", 2, PunchTrajectoryExecutor()
+    )
+    metadata, contents = build_punch_trajectory_package(valid_quaternion=False)
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        endpoint = (
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/"
+            f"{metadata.analyses[0].analysis_id}"
+        )
+        failed = client.get(endpoint, headers=headers).json()
+        assert failed["status"] == "failed"
+        assert failed["error_code"] == "missing_quaternion"
+
+        class EmptyTrajectoryExecutor:
+            def execute(self, *, inputs, parameters):
+                assert len(inputs) == 2
+                return {
+                    "algorithm_version": "trajectory_rule_v1",
+                    "coordinate_system": "session_local_x_right_y_forward_z_up",
+                    "distance_unit": "m",
+                    "left_punch_count": 0,
+                    "right_punch_count": 0,
+                    "total_punch_count": 0,
+                    "trajectories": [],
+                }
+
+        client.app.state.analysis_registry.register_executor(
+            "punch_trajectory", 2, EmptyTrajectoryExecutor()
+        )
+        assert client.post(f"{endpoint}/retry", headers=headers).status_code == 202
+        completed = client.get(endpoint, headers=headers).json()
+        assert completed["status"] == "completed"
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+            assert all(item.csv_blob for item in session.scalars(select(ImuCsvFile)))
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "軌跡原始點數超過顯示上限")
+def test_trajectory_result_with_three_hundred_points_round_trips_database(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+
+    class MaximumTrajectoryExecutor:
+        def execute(self, *, inputs, parameters):
+            return {
+                "algorithm_version": "trajectory_rule_v1",
+                "coordinate_system": "session_local_x_right_y_forward_z_up",
+                "distance_unit": "m",
+                "left_punch_count": 1,
+                "right_punch_count": 0,
+                "total_punch_count": 1,
+                "trajectories": [{
+                    "hand": "left",
+                    "punch_index": 1,
+                    "start_elapsed_us": 2_000_000,
+                    "end_elapsed_us": 2_299_000,
+                    "duration_seconds": 0.299,
+                    "path_length_m": 0.299,
+                    "maximum_displacement_m": 0.299,
+                    "points": [
+                        {
+                            "elapsed_us": 2_000_000 + index * 1_000,
+                            "x_m": 0.0,
+                            "y_m": index / 1_000,
+                            "z_m": 0.0,
+                        }
+                        for index in range(300)
+                    ],
+                }],
+            }
+
+    client.app.state.analysis_registry.register_executor(
+        "punch_trajectory", 2, MaximumTrajectoryExecutor()
+    )
+    metadata, contents = build_punch_trajectory_package()
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/"
+            f"{metadata.analyses[0].analysis_id}", headers=headers,
+        ).json()
+        assert payload["status"] == "completed"
+        assert len(payload["result"]["trajectories"][0]["points"]) == 300
+        with factory() as session:
+            job = session.get(AnalysisJob, str(metadata.analyses[0].analysis_id))
+            assert len(json.loads(job.result.result_json)["trajectories"][0]["points"]) == 300
     engine.dispose()
 
 

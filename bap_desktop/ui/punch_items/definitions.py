@@ -43,7 +43,13 @@ PUNCH_ITEM_DEFINITIONS = {
         (),
         configuration_decided=False,
     ),
-    "出拳軌跡": PunchItemDefinition("出拳軌跡", "punch_trajectory", "記錄左右手的動作路徑。", WRIST_PLACEMENTS),
+    "出拳軌跡": PunchItemDefinition(
+        "出拳軌跡",
+        "punch_trajectory",
+        "指定左右手腕 IMU，以互動式 3D 圖查看每一拳的動作路徑。",
+        WRIST_PLACEMENTS,
+        spec_version=2,
+    ),
     "拳種辨識": PunchItemDefinition(
         "拳種辨識",
         "punch_classification",

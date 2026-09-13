@@ -143,6 +143,9 @@ backend = [
 ]
 desktop = [
     { name = "keyring" },
+    { name = "numpy" },
+    { name = "pyopengl" },
+    { name = "pyqtgraph" },
     { name = "pyside6" },
 ]
 packaging = [
@@ -165,6 +168,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "keyring", marker = "extra == 'desktop'", specifier = ">=25.6,<26" },
     { name = "numpy", marker = "extra == 'backend'", specifier = ">=1.26,<3" },
+    { name = "numpy", marker = "extra == 'desktop'", specifier = ">=1.26,<3" },
     { name = "onnxruntime", marker = "extra == 'backend'", specifier = ">=1.20,<2" },
     { name = "packaging", specifier = ">=24,<27" },
     { name = "pydantic", specifier = ">=2.11,<3" },
@@ -172,6 +176,8 @@ requires-dist = [
     { name = "pyinstaller", marker = "extra == 'packaging'", specifier = ">=6.15,<7" },
     { name = "pyjwt", marker = "extra == 'backend'", specifier = ">=2.10,<3" },
     { name = "pynmea2", specifier = "==1.19.0" },
+    { name = "pyopengl", marker = "extra == 'desktop'", specifier = ">=3.1.7,<4" },
+    { name = "pyqtgraph", marker = "extra == 'desktop'", specifier = ">=0.13.7,<0.14" },
     { name = "pyserial", specifier = "==3.4" },
     { name = "pyside6", marker = "extra == 'desktop'", specifier = ">=6.9,<7" },
     { name = "python-multipart", marker = "extra == 'backend'", specifier = ">=0.0.20,<1" },
@@ -1029,6 +1035,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c0/d7/5d0e36d00cd8aa19a6e717bcd1216ca805d86865501dfebdd18667c9edbd/pynmea2-1.19.0.tar.gz", hash = "sha256:1daa79b93279f887d1c235e5cc5c79e32644564138ce46989ab0f4a2fc970d7c", size = 36240, upload-time = "2023-01-19T20:52:56.289Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/75/24/1f575eb17a8135e54b3c243ff87e2f4d6b2389942836021d0628ed837559/pynmea2-1.19.0-py3-none-any.whl", hash = "sha256:5138558b4fb5daa587b2c17de99eb43df0297039de1c98010c996624abfb00eb", size = 30016, upload-time = "2023-01-19T20:52:54.38Z" },
+]
+
+[[package]]
+name = "pyopengl"
+version = "3.1.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/16/912b7225d56284859cd9a672827f18be43f8012f8b7b932bc4bd959a298e/pyopengl-3.1.10.tar.gz", hash = "sha256:c4a02d6866b54eb119c8e9b3fb04fa835a95ab802dd96607ab4cdb0012df8335", size = 1915580, upload-time = "2025-08-18T02:33:01.76Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/e4/1ba6f44e491c4eece978685230dde56b14d51a0365bc1b774ddaa94d14cd/pyopengl-3.1.10-py3-none-any.whl", hash = "sha256:794a943daced39300879e4e47bd94525280685f42dbb5a998d336cfff151d74f", size = 3194996, upload-time = "2025-08-18T02:32:59.902Z" },
+]
+
+[[package]]
+name = "pyqtgraph"
+version = "0.13.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/d9/b62d5cddb3caa6e5145664bee5ed90223dee23ca887ed3ee479f2609e40a/pyqtgraph-0.13.7.tar.gz", hash = "sha256:64f84f1935c6996d0e09b1ee66fe478a7771e3ca6f3aaa05f00f6e068321d9e3", size = 2343380, upload-time = "2024-04-29T02:18:58.467Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/34/5702b3b7cafe99be1d94b42f100e8cc5e6957b761fcb1cf5f72d492851da/pyqtgraph-0.13.7-py3-none-any.whl", hash = "sha256:7754edbefb6c367fa0dfb176e2d0610da3ada20aa7a5318516c74af5fb72bf7a", size = 1925473, upload-time = "2024-04-29T02:18:56.206Z" },
 ]
 
 [[package]]

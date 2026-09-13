@@ -31,6 +31,7 @@ from bap_desktop.services.analysis_recording import LiveAnalysisRecording, Recor
 from bap_common.analysis_session import SessionStopReason
 from bap_desktop.ui.components import Card, PageHeader
 from bap_desktop.ui.punch_items.definitions import ImuPlacement, get_punch_item_definition
+from bap_desktop.ui.punch_items.trajectory_view import TrajectoryResultView
 
 
 class _DiscoverySignals(QObject):
@@ -87,7 +88,7 @@ class PunchItemPage(QWidget):
         self.item_name = item_name
         self.definition = get_punch_item_definition(item_name)
         self._is_available_item = self.definition.analysis_type in {
-            "punch_count", "punch_speed", "punch_classification"
+            "punch_count", "punch_speed", "punch_trajectory", "punch_classification"
         }
         self.service = service or ImuDiscoveryService()
         self.analysis_flow = analysis_flow
@@ -452,9 +453,10 @@ class PunchItemPage(QWidget):
         self._clear_source_selectors()
         self.installation_confirmation.setVisible(False)
         self.message.setVisible(False)
-        if self.definition.analysis_type == "punch_speed":
+        if self.definition.analysis_type in {"punch_speed", "punch_trajectory"}:
             self.status.setText(
-                "下一步：將雙手自然放下並保持不動，再按「開始校正」。"
+                "下一步：面向預計出拳的方向，將雙手自然放下並保持不動，"
+                "再按「開始校正」。"
                 "系統會校正兩秒；校正完成後，再由你按按鈕開始正式錄製。"
             )
         else:
@@ -463,12 +465,14 @@ class PunchItemPage(QWidget):
         self._measurement_state = "ready"
         self.continue_button.setText(
             "開始校正"
-            if self.definition.analysis_type == "punch_speed"
+            if self.definition.analysis_type in {"punch_speed", "punch_trajectory"}
             else "開始測量"
         )
         self.continue_button.setEnabled(True)
         self.retry_button.setVisible(False)
-        self.duration_row.setVisible(self.definition.analysis_type != "punch_speed")
+        self.duration_row.setVisible(
+            self.definition.analysis_type not in {"punch_speed", "punch_trajectory"}
+        )
         self.timer_details.setVisible(False)
         self.service.clear()
 
@@ -492,7 +496,7 @@ class PunchItemPage(QWidget):
         if self.recording_root is None:
             self._show_error("本機 Session 暫存位置尚未設定")
             return
-        if self.definition.analysis_type == "punch_speed":
+        if self.definition.analysis_type in {"punch_speed", "punch_trajectory"}:
             # 校正尚未完成時不要求 user 決定正式錄製時間。這個值只用來建立
             # 暫存錄製物件，正式時間會在 user 按下「開始正式錄製」時覆寫。
             requested_duration = 60
@@ -738,6 +742,10 @@ class PunchItemPage(QWidget):
         self._show_analysis_result(validated.result)
 
     def _show_analysis_result(self, result: dict) -> None:
+        if self.definition.analysis_type == "punch_trajectory":
+            self.trajectory_result_view = TrajectoryResultView(result)
+            self.sources_layout.addWidget(self.trajectory_result_view)
+            return
         if self.definition.analysis_type == "punch_classification":
             labels = {
                 "left_jab": "左刺拳",

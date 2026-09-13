@@ -119,7 +119,7 @@ def test_keyboard_can_activate_navigation_and_focus_is_visually_defined(qtbot) -
 
 @pytest.mark.scenario("desktop-ui-design", "顯示待開發項目")
 @pytest.mark.scenario("desktop-app-shell", "查看拳擊測量項目")
-def test_home_has_three_available_items_and_two_pending_items(qtbot) -> None:
+def test_home_has_four_available_items_and_one_pending_item(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
 
@@ -133,10 +133,11 @@ def test_home_has_three_available_items_and_two_pending_items(qtbot) -> None:
     assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
     assert "可使用" in window.home_page.punch_buttons["拳頭速度"].text()
     assert "可使用" in window.home_page.punch_buttons["拳種辨識"].text()
+    assert "可使用" in window.home_page.punch_buttons["出拳軌跡"].text()
     assert all(
         "待開發" in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name not in {"出拳次數", "拳頭速度", "拳種辨識"}
+        if name not in {"出拳次數", "拳頭速度", "出拳軌跡", "拳種辨識"}
     )
     assert not any("拳型辨識" in button.text() for button in window.home_page.punch_buttons.values())
 
@@ -364,6 +365,7 @@ def test_keyboard_can_select_imus_in_visual_field_order(qtbot) -> None:
 
 
 @pytest.mark.scenario("desktop-ui-design", "使用支援的最小視窗")
+@pytest.mark.scenario("desktop-ui-design", "user 縮小視窗")
 def test_minimum_window_has_resizable_scrolling_content(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
@@ -523,6 +525,7 @@ def test_executable_capability_enables_start_measurement(qtbot, tmp_path: Path) 
 
 @pytest.mark.scenario("imu-source-discovery", "分析 Executor 尚未提供")
 @pytest.mark.scenario("boxing-analysis-session", "Analysis Executor 尚未提供")
+@pytest.mark.scenario("desktop-app-shell", "完成待開發項目的 IMU 來源選擇")
 @pytest.mark.scenario("punch-speed-analysis", "Backend 尚未提供可執行 Executor")
 def test_unavailable_capability_does_not_record(qtbot) -> None:
     page = make_punch_page(qtbot, "出拳次數")
@@ -596,7 +599,11 @@ def test_start_measurement_shows_elapsed_time_and_stop_action(qtbot, tmp_path: P
 
 @pytest.mark.scenario("punch-speed-analysis", "正式測量前先做兩秒靜止校正")
 @pytest.mark.scenario("punch-speed-analysis", "user 完成靜止校正")
-def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path) -> None:
+@pytest.mark.scenario("punch-trajectory-analysis", "校正完成後開始正式測量")
+@pytest.mark.parametrize("item_name", ("拳頭速度", "出拳軌跡"))
+def test_two_stage_analysis_calibrates_before_formal_measurement(
+    qtbot, tmp_path: Path, item_name: str
+) -> None:
     class Recording:
         def __init__(self, *_args, **kwargs):
             self.kwargs = kwargs
@@ -633,7 +640,7 @@ def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path)
         def remaining_seconds(self):
             return 10.0
 
-    page = make_punch_page(qtbot, "拳頭速度")
+    page = make_punch_page(qtbot, item_name)
     page.recording_root = tmp_path
     page.recording_factory = Recording
     first, second = page._source_selectors
@@ -667,17 +674,24 @@ def test_punch_speed_calibrates_before_formal_measurement(qtbot, tmp_path: Path)
     page.shutdown()
 
 
-def test_punch_speed_ready_state_explains_calibration_and_manual_next_step(qtbot) -> None:
+@pytest.mark.scenario("punch-trajectory-analysis", "user 準備校正")
+@pytest.mark.parametrize(
+    "item_name,analysis_type", (("拳頭速度", "punch_speed"), ("出拳軌跡", "punch_trajectory"))
+)
+def test_two_stage_ready_state_explains_calibration_and_manual_next_step(
+    qtbot, item_name: str, analysis_type: str
+) -> None:
     speed_specification = next(
         specification
         for specification in builtin_analysis_specifications()
-        if specification.analysis_type == "punch_speed"
+        if specification.analysis_type == analysis_type
         and specification.spec_version == 2
     )
-    page = make_punch_page(qtbot, "拳頭速度")
+    page = make_punch_page(qtbot, item_name)
     page._capability_ready(AnalysisCapability(speed_specification, True))
 
-    assert "將雙手自然放下並保持不動" in page.status.text()
+    assert "面向預計出拳的方向" in page.status.text()
+    assert "保持不動" in page.status.text()
     assert "校正完成後" in page.status.text()
     assert page.continue_button.text() == "開始校正"
     assert page.duration_row.isHidden()
@@ -709,7 +723,11 @@ def test_punch_speed_rejects_invalid_duration_after_calibration(qtbot, value: st
 
 
 @pytest.mark.scenario("punch-speed-analysis", "校正期間必要 IMU 中斷")
-def test_punch_speed_calibration_interruption_returns_to_retry_state(qtbot) -> None:
+@pytest.mark.scenario("punch-trajectory-analysis", "校正期間 IMU 中斷")
+@pytest.mark.parametrize("item_name", ("拳頭速度", "出拳軌跡"))
+def test_two_stage_calibration_interruption_returns_to_retry_state(
+    qtbot, item_name: str
+) -> None:
     from bap_common.analysis_session import SessionStopReason
 
     class Recording:
@@ -721,7 +739,7 @@ def test_punch_speed_calibration_interruption_returns_to_retry_state(qtbot) -> N
         def abort(self):
             self.aborted = True
 
-    page = make_punch_page(qtbot, "拳頭速度")
+    page = make_punch_page(qtbot, item_name)
     page._recording = Recording()
     page._measurement_state = "calibrating"
     page._update_elapsed()
@@ -949,3 +967,44 @@ def test_upload_failure_offers_retry_without_new_recording(qtbot) -> None:
     assert page._measurement_state == "upload_failed"
     assert page.continue_button.text() == "重試上傳"
     assert "不需要重新測量" in page.message.text()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "首次顯示有效軌跡 Result")
+@pytest.mark.scenario("punch-trajectory-analysis", "正式資料沒有偵測到出拳")
+def test_trajectory_completed_result_uses_trajectory_view_and_keeps_restart(
+    qtbot, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QWidget
+    import bap_desktop.ui.punch_items.page as page_module
+
+    rendered = []
+
+    class FakeTrajectoryView(QWidget):
+        def __init__(self, result):
+            super().__init__()
+            rendered.append(result)
+
+    class Flow:
+        def validate_completed(self, _payload):
+            return SimpleNamespace(
+                session_id="trajectory-session",
+                analysis_id="trajectory-analysis",
+                result={
+                    "algorithm_version": "trajectory_rule_v1",
+                    "coordinate_system": "session_local_x_right_y_forward_z_up",
+                    "distance_unit": "m",
+                    "left_punch_count": 0,
+                    "right_punch_count": 0,
+                    "total_punch_count": 0,
+                    "trajectories": [],
+                },
+            )
+
+    monkeypatch.setattr(page_module, "TrajectoryResultView", FakeTrajectoryView)
+    page = make_punch_page(qtbot, "出拳軌跡")
+    page.analysis_flow = Flow()
+    page._analysis_status_ready({"status": "completed"})
+    assert rendered and rendered[0]["trajectories"] == []
+    assert page.continue_button.text() == "重新測量"
+    assert page.continue_button.isEnabled()

@@ -425,7 +425,11 @@ def test_live_recording_preserves_partial_wireless_data_with_source_reason(tmp_p
 
 @pytest.mark.scenario("punch-speed-analysis", "校正資料與正式測量共用同一組 CSV")
 @pytest.mark.scenario("punch-speed-analysis", "正式測量時間不包含校正時間")
-def test_punch_speed_recording_adds_two_second_boundary_to_analysis_parameters(tmp_path: Path):
+@pytest.mark.scenario("punch-trajectory-analysis", "校正完成後開始正式測量")
+@pytest.mark.parametrize("analysis_type", ("punch_speed", "punch_trajectory"))
+def test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters(
+    tmp_path: Path, analysis_type: str
+):
     class Clock:
         value = 10.0
 
@@ -479,7 +483,7 @@ def test_punch_speed_recording_adds_two_second_boundary_to_analysis_parameters(t
             "left_wrist": ImuSource("COM5", ConnectionType.WIRED),
             "right_wrist": ImuSource("COM6", ConnectionType.WIRED),
         },
-        analysis_type="punch_speed",
+        analysis_type=analysis_type,
         spec_version=2,
         desktop_version="0.1.14",
         requested_duration_seconds=60,
