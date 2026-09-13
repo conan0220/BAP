@@ -22,6 +22,7 @@ from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
 from bap_backend.app.services.punch_count import PunchCountExecutor
 from bap_backend.app.services.punch_speed import PunchSpeedExecutor
+from bap_backend.app.services.punch_trajectory import PunchTrajectoryExecutor
 from bap_backend.app.services.punch_classification import (
     PunchClassificationBundleError,
     PunchClassificationExecutor,
@@ -39,6 +40,7 @@ def create_default_analysis_registry() -> AnalysisRegistry:
     registry = AnalysisRegistry(builtin_analysis_specifications())
     registry.register_executor("punch_count", 1, PunchCountExecutor())
     registry.register_executor("punch_speed", 2, PunchSpeedExecutor())
+    registry.register_executor("punch_trajectory", 2, PunchTrajectoryExecutor())
     try:
         bundle = PunchClassificationModelBundle(default_model_bundle_path())
     except PunchClassificationBundleError:

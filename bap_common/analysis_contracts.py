@@ -135,6 +135,20 @@ class AnalysisSpecification(BaseModel):
                 raise ContractError(
                     "invalid_parameter", "正式測量開始時間必須是大於零的整數 microseconds"
                 )
+        if self.analysis_type == "punch_trajectory" and self.spec_version == 2:
+            if "measurement_start_elapsed_us" not in parameters:
+                raise ContractError(
+                    "missing_parameter", "出拳軌跡缺少正式測量開始時間"
+                )
+            boundary = parameters["measurement_start_elapsed_us"]
+            if (
+                isinstance(boundary, bool)
+                or not isinstance(boundary, int)
+                or boundary <= 0
+            ):
+                raise ContractError(
+                    "invalid_parameter", "正式測量開始時間必須是大於零的整數 microseconds"
+                )
 
     def validate_result(self, result: dict[str, Any]) -> None:
         fields = {field.name: field for field in self.result_fields}
@@ -158,6 +172,8 @@ class AnalysisSpecification(BaseModel):
             _validate_punch_speed_result(result)
         if self.analysis_type == "punch_classification" and self.spec_version == 2:
             _validate_punch_classification_result(result)
+        if self.analysis_type == "punch_trajectory" and self.spec_version == 2:
+            _validate_punch_trajectory_result(result)
 
 
 PUNCH_CLASSIFICATION_TYPES = (
@@ -292,6 +308,90 @@ def _validate_punch_speed_result(result: dict[str, Any]) -> None:
             raise ContractError("invalid_result_value", "拳頭速度摘要必須能由每拳明細重新算出")
 
 
+def _validate_punch_trajectory_result(result: dict[str, Any]) -> None:
+    if not result["algorithm_version"].strip():
+        raise ContractError("invalid_result_value", "出拳軌跡缺少演算法版本")
+    if result["coordinate_system"] != "session_local_x_right_y_forward_z_up":
+        raise ContractError("invalid_result_value", "出拳軌跡座標系統不正確")
+    if result["distance_unit"] != "m":
+        raise ContractError("invalid_result_value", "出拳軌跡距離單位必須是公尺")
+
+    counts = {
+        "left": result["left_punch_count"],
+        "right": result["right_punch_count"],
+    }
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts.values()):
+        raise ContractError("invalid_result_value", "左右手拳數必須是非負整數")
+    total = result["total_punch_count"]
+    if isinstance(total, bool) or not isinstance(total, int) or total != sum(counts.values()):
+        raise ContractError("invalid_result_value", "總拳數必須等於左右手拳數相加")
+
+    trajectories = result["trajectories"]
+    if len(trajectories) != total:
+        raise ContractError("invalid_result_value", "拳數必須與軌跡數量一致")
+    expected_keys = {
+        "hand", "punch_index", "start_elapsed_us", "end_elapsed_us",
+        "duration_seconds", "path_length_m", "maximum_displacement_m", "points",
+    }
+    expected_point_keys = {"elapsed_us", "x_m", "y_m", "z_m"}
+    by_hand = {"left": 0, "right": 0}
+    previous_start = -1
+    for trajectory in trajectories:
+        if not isinstance(trajectory, dict) or set(trajectory) != expected_keys:
+            raise ContractError("invalid_result_value", "每拳軌跡欄位不正確")
+        hand = trajectory["hand"]
+        if hand not in by_hand:
+            raise ContractError("invalid_result_value", "每拳軌跡的手別不正確")
+        by_hand[hand] += 1
+        if isinstance(trajectory["punch_index"], bool) or trajectory["punch_index"] != by_hand[hand]:
+            raise ContractError("invalid_result_value", "每隻手的拳序必須從一開始連續增加")
+        start = trajectory["start_elapsed_us"]
+        end = trajectory["end_elapsed_us"]
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in (start, end)):
+            raise ContractError("invalid_result_value", "軌跡時間必須是非負整數")
+        if start > end or start < previous_start:
+            raise ContractError("invalid_result_value", "軌跡時間順序不正確")
+        previous_start = start
+        for name in ("duration_seconds", "path_length_m", "maximum_displacement_m"):
+            value = trajectory[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) < 0
+            ):
+                raise ContractError("invalid_result_value", f"軌跡摘要 {name} 必須是非負有限數值")
+        expected_duration = (end - start) / 1_000_000
+        if not math.isclose(float(trajectory["duration_seconds"]), expected_duration, abs_tol=0.001):
+            raise ContractError("invalid_result_value", "軌跡持續時間與起訖時間不一致")
+        points = trajectory["points"]
+        if not 2 <= len(points) <= 300:
+            raise ContractError("invalid_result_value", "每拳軌跡必須包含 2 至 300 個顯示點")
+        previous_elapsed = -1
+        for point in points:
+            if not isinstance(point, dict) or set(point) != expected_point_keys:
+                raise ContractError("invalid_result_value", "軌跡點欄位不正確")
+            elapsed = point["elapsed_us"]
+            if isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < previous_elapsed:
+                raise ContractError("invalid_result_value", "軌跡點時間順序不正確")
+            if elapsed < start or elapsed > end:
+                raise ContractError("invalid_result_value", "軌跡點時間超出該拳範圍")
+            previous_elapsed = elapsed
+            for axis in ("x_m", "y_m", "z_m"):
+                coordinate = point[axis]
+                if (
+                    isinstance(coordinate, bool)
+                    or not isinstance(coordinate, (int, float))
+                    or not math.isfinite(float(coordinate))
+                ):
+                    raise ContractError("invalid_result_value", "軌跡座標必須是有限數值")
+        first = points[0]
+        if any(not math.isclose(float(first[axis]), 0.0, abs_tol=1e-9) for axis in ("x_m", "y_m", "z_m")):
+            raise ContractError("invalid_result_value", "每拳軌跡的第一點必須是原點")
+    if by_hand != counts:
+        raise ContractError("invalid_result_value", "左右手拳數必須與軌跡明細一致")
+
+
 def _matches_type(value: Any, expected: ResultValueType) -> bool:
     if expected is ResultValueType.INTEGER:
         return isinstance(value, int) and not isinstance(value, bool)
@@ -354,6 +454,22 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
             analysis_type="punch_trajectory", spec_version=1, display_name="出拳軌跡",
             input_roles=wrist_roles,
             result_fields=(ResultFieldSpecification(name="summary", value_type=ResultValueType.OBJECT),),
+        ),
+        AnalysisSpecification(
+            analysis_type="punch_trajectory",
+            spec_version=2,
+            display_name="出拳軌跡",
+            input_roles=wrist_roles,
+            parameter_names=("measurement_start_elapsed_us",),
+            result_fields=(
+                ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="coordinate_system", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="distance_unit", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="left_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="right_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="total_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="trajectories", value_type=ResultValueType.ARRAY),
+            ),
         ),
         AnalysisSpecification(
             analysis_type="punch_classification", spec_version=1, display_name="拳種辨識",

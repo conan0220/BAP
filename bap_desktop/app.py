@@ -404,6 +404,42 @@ def main() -> int:
         )
     if smoke_test:
         app.processEvents()
+        from bap_desktop.ui.punch_items.trajectory_view import TrajectoryResultView
+
+        trajectory_result = {
+            "algorithm_version": "trajectory_rule_v1",
+            "coordinate_system": "session_local_x_right_y_forward_z_up",
+            "distance_unit": "m",
+            "left_punch_count": 1,
+            "right_punch_count": 0,
+            "total_punch_count": 1,
+            "trajectories": [{
+                "hand": "left", "punch_index": 1,
+                "start_elapsed_us": 2_000_000, "end_elapsed_us": 2_100_000,
+                "duration_seconds": 0.1, "path_length_m": 0.1,
+                "maximum_displacement_m": 0.1,
+                "points": [
+                    {"elapsed_us": 2_000_000, "x_m": 0.0, "y_m": 0.0, "z_m": 0.0},
+                    {"elapsed_us": 2_100_000, "x_m": 0.0, "y_m": 0.1, "z_m": 0.0},
+                ],
+            }],
+        }
+        trajectory_view = TrajectoryResultView(trajectory_result)
+        trajectory_view.show()
+        app.processEvents()
+        if trajectory_view._canvas is None:
+            return 3
+
+        def force_3d_failure():
+            raise RuntimeError("forced 3D smoke-test failure")
+
+        fallback_view = TrajectoryResultView(
+            trajectory_result, canvas_factory=force_3d_failure
+        )
+        if not hasattr(fallback_view, "fallback_label"):
+            return 4
+        trajectory_view.close()
+        fallback_view.close()
         window.hide()
         return 0
     return app.exec()
