@@ -28,7 +28,12 @@ from bap_common.analysis_session import (
 )
 from bap_common.imu_csv import frame_csv_row, inspect_common_imu_csv, write_header
 from bap_desktop.services.imu_discovery import ImuSource
-from bap_desktop.services.imu_capture import CaptureDuration, ImuCaptureError, LiveImuCapture
+from bap_desktop.services.imu_capture import (
+    CaptureDuration,
+    GatewayPacketIndexer,
+    ImuCaptureError,
+    LiveImuCapture,
+)
 from bap_desktop.services.imu_scan import (
     DEFAULT_BAUD_RATE,
     ConnectionType,
@@ -259,15 +264,12 @@ class AnalysisSessionRecorder:
             filename = f"imu_{csv_id}.csv"
             recorder = CommonImuCsvRecorder(directory / filename)
             with recorder:
-                packet_numbers: dict[int, int] = {}
+                gateway_packets = GatewayPacketIndexer()
                 for index, frame in enumerate(result.frames):
                     if source.connection_type is ConnectionType.WIRELESS_RECEIVER:
+                        packet_index = gateway_packets.observe(frame, fallback_key=index)
                         if frame.gw_id != source.group_id or frame.node_id != source.node_id:
                             continue
-                        packet_key = int(frame.gw_ts_ms or index)
-                        if packet_key not in packet_numbers:
-                            packet_numbers[packet_key] = len(packet_numbers)
-                        packet_index = packet_numbers[packet_key]
                     else:
                         if frame.frame_type == 0x63:
                             continue
