@@ -16,7 +16,7 @@
 
 ## 2. 建立 punch_trajectory version 2 契約
 
-- [x] 2.1 在共用 Analysis Specifications 加入 `punch_trajectory` version 2、左右手腕 Input Roles、`measurement_start_elapsed_us` 與完整 Result fields，保留不可執行的 version 1 placeholder。
+- [x] 2.1 在共用 Analysis Specifications 加入 `punch_trajectory` version 2、左右手腕 Input Roles、`calibration_end_elapsed_us`、`measurement_start_elapsed_us` 與完整 Result fields，保留不可執行的 version 1 placeholder。
 - [x] 2.2 實作軌跡 Result 關聯驗證，包含拳數、手別拳序、時間順序、有限座標、第一點原點、2 至 300 點及摘要非負條件。
 - [x] 2.3 新增契約 Scenario tests，驗證前後端相同 version 2、舊 `summary` placeholder、缺少校正參數及拳數與 trajectories 不一致時的結果。
 
@@ -46,9 +46,10 @@
 
 - [x] 6.1 將出拳軌跡定義更新為 `punch_trajectory` version 2，只有 Backend capability 回報 Executor 可執行時才顯示為可使用。
 - [x] 6.2 將既有兩階段錄製元件擴充到出拳軌跡，先顯示面向出拳方向與靜止姿勢說明，再錄製兩秒校正；校正前不顯示正式錄製時間。
-- [x] 6.3 校正完成後才開放 5 至 3600 秒時間輸入與「開始正式測量」，並將有效 `measurement_start_elapsed_us` 寫入 Analysis Parameters。
+- [x] 6.3 校正完成後才開放 5 至 3600 秒時間輸入與「開始正式測量」，並將有效 `calibration_end_elapsed_us` 與 `measurement_start_elapsed_us` 寫入 Analysis Parameters。
 - [x] 6.4 實作校正期間來源中斷、校正失敗、正式錄製來源中斷及 Backend 安全錯誤的 UI 狀態與重新檢測／重新測量操作。
 - [x] 6.5 新增 Desktop Scenario tests，驗證可用／待開發狀態、校正前後轉場、時間輸入、Session Parameters、中斷處理及無出拳 Result 說明。
+- [x] 6.6 將校正結束與正式錄製開始拆成兩個時間邊界，驗證 user 在兩者之間移動不會造成校正失敗或被算成正式出拳。
 
 ## 7. 實作互動式 3D Result view
 

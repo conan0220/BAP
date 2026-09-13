@@ -35,6 +35,7 @@ normalize_quaternion = _motion.normalize_quaternion
 rotate_vector = _motion.rotate_vector
 read_speed_imu_csv = _motion.read_motion_imu_csv
 measurement_start_index = _motion.measurement_start_index
+calibration_and_measurement_indices = _motion.calibration_and_measurement_indices
 build_punch_windows = _motion.build_punch_windows
 world_linear_acceleration = _motion.world_linear_acceleration
 integrate_window_peak = _motion.integrate_window_peak
@@ -44,12 +45,18 @@ def analyze_single_wrist(
     data: bytes,
     *,
     hand: str,
+    calibration_end_elapsed_us: int,
     measurement_start_elapsed_us: int,
     config: PunchSpeedRuleV1Config = RULE_V1,
 ) -> list[dict]:
     samples = read_speed_imu_csv(data, config=config)
-    start_index = measurement_start_index(samples, measurement_start_elapsed_us, config=config)
-    linear = world_linear_acceleration(samples, start_index, config=config)
+    calibration_end_index, start_index = calibration_and_measurement_indices(
+        samples,
+        calibration_end_elapsed_us,
+        measurement_start_elapsed_us,
+        config=config,
+    )
+    linear = world_linear_acceleration(samples, calibration_end_index, config=config)
     punches: list[dict] = []
     for punch_index, window in enumerate(build_punch_windows(samples, start_index), start=1):
         peak_speed, speed_peak_index = integrate_window_peak(samples, linear, window)
@@ -76,15 +83,25 @@ class PunchSpeedExecutor:
     def execute(self, *, inputs: dict[str, bytes], parameters: dict) -> dict:
         if set(inputs) != {"left_wrist", "right_wrist"}:
             raise ContractError("missing_input_role", "拳頭速度需要不同的左手腕與右手腕 CSV")
-        boundary = parameters.get("measurement_start_elapsed_us")
-        if isinstance(boundary, bool) or not isinstance(boundary, int) or boundary <= 0:
-            raise ContractError("invalid_parameter", "拳頭速度缺少有效的正式測量開始時間")
+        calibration_end = parameters.get("calibration_end_elapsed_us")
+        measurement_start = parameters.get("measurement_start_elapsed_us")
+        if any(
+            isinstance(boundary, bool) or not isinstance(boundary, int) or boundary <= 0
+            for boundary in (calibration_end, measurement_start)
+        ) or calibration_end > measurement_start:
+            raise ContractError("invalid_parameter", "拳頭速度的錄製時間邊界無效")
         try:
             left = analyze_single_wrist(
-                inputs["left_wrist"], hand="left", measurement_start_elapsed_us=boundary
+                inputs["left_wrist"],
+                hand="left",
+                calibration_end_elapsed_us=calibration_end,
+                measurement_start_elapsed_us=measurement_start,
             )
             right = analyze_single_wrist(
-                inputs["right_wrist"], hand="right", measurement_start_elapsed_us=boundary
+                inputs["right_wrist"],
+                hand="right",
+                calibration_end_elapsed_us=calibration_end,
+                measurement_start_elapsed_us=measurement_start,
             )
         except PunchSpeedDataError as error:
             raise ContractError(error.code, error.message) from error

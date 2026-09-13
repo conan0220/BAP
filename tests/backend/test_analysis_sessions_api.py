@@ -141,7 +141,10 @@ def build_punch_speed_package(
             AnalysisInputBinding(input_role="left_wrist", csv_id=descriptors[0].csv_id),
             AnalysisInputBinding(input_role="right_wrist", csv_id=descriptors[1].csv_id),
         ),
-        parameters={"measurement_start_elapsed_us": 2_000_000},
+        parameters={
+            "calibration_end_elapsed_us": 2_000_000,
+            "measurement_start_elapsed_us": 2_000_000,
+        },
     )
     now = datetime.now(timezone.utc)
     return SessionMetadata(

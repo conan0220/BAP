@@ -555,6 +555,17 @@ class PunchItemPage(QWidget):
                 remaining = float(recording.calibration_remaining_seconds())
                 self.timer_details.setText(f"校正剩餘 {remaining:.1f} 秒；請保持不動")
             if self._measurement_state == "calibrating" and recording.calibration_due():
+                try:
+                    recording.complete_calibration()
+                except Exception:
+                    recording.abort()
+                    self._measurement_state = "calibration_failed"
+                    self._elapsed_timer.stop()
+                    self.status.setText("無法完成校正，請重新檢測 IMU 後再測量。")
+                    self.continue_button.setText("重新檢測 IMU")
+                    self.continue_button.setEnabled(True)
+                    self.duration_input.setEnabled(True)
+                    return
                 self._measurement_state = "calibration_ready"
                 self.status.setText(
                     "校正完成。請輸入正式錄製時間，再按「開始正式錄製」。"

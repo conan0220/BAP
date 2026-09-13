@@ -122,32 +122,56 @@ class AnalysisSpecification(BaseModel):
         if unknown:
             raise ContractError("unknown_parameter", f"未知的 Analysis Parameter：{', '.join(unknown)}")
         if self.analysis_type == "punch_speed" and self.spec_version == 2:
-            if "measurement_start_elapsed_us" not in parameters:
+            required_boundaries = (
+                "calibration_end_elapsed_us",
+                "measurement_start_elapsed_us",
+            )
+            missing = [name for name in required_boundaries if name not in parameters]
+            if missing:
                 raise ContractError(
-                    "missing_parameter", "拳頭速度缺少正式測量開始時間"
+                    "missing_parameter",
+                    f"缺少錄製時間邊界：{', '.join(missing)}",
                 )
-            boundary = parameters["measurement_start_elapsed_us"]
-            if (
+            calibration_end = parameters["calibration_end_elapsed_us"]
+            measurement_start = parameters["measurement_start_elapsed_us"]
+            if any(
                 isinstance(boundary, bool)
                 or not isinstance(boundary, int)
                 or boundary <= 0
+                for boundary in (calibration_end, measurement_start)
             ):
                 raise ContractError(
-                    "invalid_parameter", "正式測量開始時間必須是大於零的整數 microseconds"
+                    "invalid_parameter", "錄製時間邊界必須是大於零的整數 microseconds"
+                )
+            if calibration_end > measurement_start:
+                raise ContractError(
+                    "invalid_parameter", "校正結束時間不得晚於正式測量開始時間"
                 )
         if self.analysis_type == "punch_trajectory" and self.spec_version == 2:
-            if "measurement_start_elapsed_us" not in parameters:
+            required_boundaries = (
+                "calibration_end_elapsed_us",
+                "measurement_start_elapsed_us",
+            )
+            missing = [name for name in required_boundaries if name not in parameters]
+            if missing:
                 raise ContractError(
-                    "missing_parameter", "出拳軌跡缺少正式測量開始時間"
+                    "missing_parameter",
+                    f"缺少錄製時間邊界：{', '.join(missing)}",
                 )
-            boundary = parameters["measurement_start_elapsed_us"]
-            if (
+            calibration_end = parameters["calibration_end_elapsed_us"]
+            measurement_start = parameters["measurement_start_elapsed_us"]
+            if any(
                 isinstance(boundary, bool)
                 or not isinstance(boundary, int)
                 or boundary <= 0
+                for boundary in (calibration_end, measurement_start)
             ):
                 raise ContractError(
-                    "invalid_parameter", "正式測量開始時間必須是大於零的整數 microseconds"
+                    "invalid_parameter", "錄製時間邊界必須是大於零的整數 microseconds"
+                )
+            if calibration_end > measurement_start:
+                raise ContractError(
+                    "invalid_parameter", "校正結束時間不得晚於正式測量開始時間"
                 )
 
     def validate_result(self, result: dict[str, Any]) -> None:
@@ -437,7 +461,10 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
             spec_version=2,
             display_name="拳頭速度",
             input_roles=wrist_roles,
-            parameter_names=("measurement_start_elapsed_us",),
+            parameter_names=(
+                "calibration_end_elapsed_us",
+                "measurement_start_elapsed_us",
+            ),
             result_fields=(
                 ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
                 ResultFieldSpecification(name="left_punch_count", value_type=ResultValueType.INTEGER),
@@ -460,7 +487,10 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
             spec_version=2,
             display_name="出拳軌跡",
             input_roles=wrist_roles,
-            parameter_names=("measurement_start_elapsed_us",),
+            parameter_names=(
+                "calibration_end_elapsed_us",
+                "measurement_start_elapsed_us",
+            ),
             result_fields=(
                 ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
                 ResultFieldSpecification(name="coordinate_system", value_type=ResultValueType.STRING),

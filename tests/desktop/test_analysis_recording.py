@@ -497,10 +497,12 @@ def test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters(
     assert recording.remaining_seconds() == 60
     clock.value = 12.0
     assert recording.calibration_due()
+    assert recording.complete_calibration() == 2_000_000
     recording.set_requested_duration(5)
-    assert recording.begin_measurement() == 2_000_000
+    clock.value = 15.0
+    assert recording.begin_measurement() == 5_000_000
     assert not recording.is_calibrating
-    clock.value = 17.0
+    clock.value = 20.0
     assert recording.due_stop_reason() is SessionStopReason.DURATION_REACHED
     draft = recording.stop(SessionStopReason.DURATION_REACHED)
 
@@ -508,7 +510,8 @@ def test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters(
     assert draft.metadata.requested_duration_seconds == 5
     assert len(draft.metadata.csv_files) == 2
     assert draft.metadata.analyses[0].parameters == {
-        "measurement_start_elapsed_us": 2_000_000
+        "calibration_end_elapsed_us": 2_000_000,
+        "measurement_start_elapsed_us": 5_000_000,
     }
 
 

@@ -374,6 +374,7 @@ class LiveAnalysisRecording:
         )
         self.draft = SessionDraft(self.capture.session_id, self.capture.directory)
         self._finalization_lock = Lock()
+        self._calibration_end_elapsed_us: int | None = None
         self._measurement_started_monotonic: float | None = None
         self._measurement_start_elapsed_us: int | None = None
 
@@ -402,20 +403,39 @@ class LiveAnalysisRecording:
     def calibration_due(self, *, now: float | None = None) -> bool:
         return self.is_calibrating and self.calibration_remaining_seconds(now=now) <= 0
 
+    def complete_calibration(self, *, now: float | None = None) -> int:
+        if self.calibration_seconds <= 0:
+            return 0
+        if self._calibration_end_elapsed_us is not None:
+            return self._calibration_end_elapsed_us
+        current = self.monotonic() if now is None else now
+        if not self.calibration_due(now=current):
+            raise RecordingError("校正時間尚未完成")
+        self._calibration_end_elapsed_us = max(
+            1, round((current - self.capture.started_monotonic) * 1_000_000)
+        )
+        return self._calibration_end_elapsed_us
+
     def begin_measurement(self, *, now: float | None = None) -> int:
         if self._measurement_started_monotonic is not None:
             return self._measurement_start_elapsed_us or 0
         current = self.monotonic() if now is None else now
+        if self.calibration_seconds > 0 and self._calibration_end_elapsed_us is None:
+            self.complete_calibration(now=current)
         self._measurement_started_monotonic = current
         self._measurement_start_elapsed_us = max(
             1, round((current - self.capture.started_monotonic) * 1_000_000)
         )
-        parameters = (
-            {"measurement_start_elapsed_us": self._measurement_start_elapsed_us}
-            if self.analysis_type in {"punch_speed", "punch_trajectory"}
+        if (
+            self.analysis_type in {"punch_speed", "punch_trajectory"}
             and self.spec_version == 2
-            else {}
-        )
+        ):
+            parameters = {
+                "calibration_end_elapsed_us": self._calibration_end_elapsed_us,
+                "measurement_start_elapsed_us": self._measurement_start_elapsed_us,
+            }
+        else:
+            parameters = {}
         self.job = build_analysis_request(
             analysis_type=self.analysis_type,
             spec_version=self.spec_version,

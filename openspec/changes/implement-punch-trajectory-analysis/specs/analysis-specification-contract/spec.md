@@ -10,11 +10,11 @@
 ## ADDED Requirements
 
 ### Requirement: punch_trajectory version 2 必須使用明確契約
-`punch_trajectory` version 2 MUST 使用不同的 `left_wrist` 與 `right_wrist` Input Roles，MUST 要求正整數 `measurement_start_elapsed_us` Parameter，並 MUST 以明確欄位定義版本、座標系統、距離單位、左右手拳數、總拳數及逐拳軌跡。Backend MUST NOT 讓只認得 version 1 `summary` placeholder 的舊 Desktop App 執行 version 2。
+`punch_trajectory` version 2 MUST 使用不同的 `left_wrist` 與 `right_wrist` Input Roles，MUST 要求正整數 `calibration_end_elapsed_us` 與 `measurement_start_elapsed_us` Parameters，且校正結束時間 MUST NOT 晚於正式測量開始時間。Result MUST 以明確欄位定義版本、座標系統、距離單位、左右手拳數、總拳數及逐拳軌跡。Backend MUST NOT 讓只認得 version 1 `summary` placeholder 的舊 Desktop App 執行 version 2。
 
 #### Scenario: 前後端使用相同的 version 2
 - **WHEN** Desktop App 與 Backend 都支援 `punch_trajectory` version 2
-- **THEN** Desktop App 能提交左右手腕 Input Bindings 與校正結束時間
+- **THEN** Desktop App 能提交左右手腕 Input Bindings、校正結束時間與正式測量開始時間
 - **AND** Backend 依 version 2 驗證輸入及 Result
 
 #### Scenario: version 2 Result 仍使用 summary placeholder

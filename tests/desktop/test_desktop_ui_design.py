@@ -610,6 +610,7 @@ def test_two_stage_analysis_calibrates_before_formal_measurement(
             self.is_calibrating = True
             self.due = False
             self.began = False
+            self.calibration_completed = False
             self.requested_duration = None
 
         def start(self):
@@ -626,6 +627,10 @@ def test_two_stage_analysis_calibrates_before_formal_measurement(
 
         def calibration_due(self):
             return self.due
+
+        def complete_calibration(self):
+            self.calibration_completed = True
+            return 2_000_000
 
         def set_requested_duration(self, seconds):
             self.requested_duration = seconds
@@ -658,6 +663,7 @@ def test_two_stage_analysis_calibrates_before_formal_measurement(
     assert not page.continue_button.isEnabled()
     page._recording.due = True
     page._update_elapsed()
+    assert page._recording.calibration_completed
     assert not page._recording.began
     assert page._measurement_state == "calibration_ready"
     assert not page.duration_row.isHidden()
