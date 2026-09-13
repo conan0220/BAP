@@ -47,11 +47,12 @@ PUNCH_ITEM_DEFINITIONS = {
     "拳種辨識": PunchItemDefinition(
         "拳種辨識",
         "punch_classification",
-        "由持把人左右手把背面的 IMU 記錄擊打動作。",
+        "由持靶人左右拳靶背面的 IMU 記錄擊打動作。",
         (
-            ImuPlacement("holder_left_pad", "左手把背面", "持把人"),
-            ImuPlacement("holder_right_pad", "右手把背面", "持把人"),
+            ImuPlacement("holder_left_pad", "左手拳靶背面", "持靶人"),
+            ImuPlacement("holder_right_pad", "右手拳靶背面", "持靶人"),
         ),
+        spec_version=2,
     ),
 }
 

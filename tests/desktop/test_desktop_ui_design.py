@@ -59,6 +59,9 @@ class DiscoveryStub:
 class DiagnosticsStub:
     duration_seconds = 5.0
 
+    def run(self, *, cancel_event=None, phase_callback=None) -> DiagnosticReport:
+        return DiagnosticReport((), ())
+
     def cleanup(self) -> None:
         pass
 
@@ -99,7 +102,10 @@ def test_authenticated_shell_shows_navigation_account_and_current_page(qtbot) ->
 
 @pytest.mark.scenario("desktop-ui-design", "使用鍵盤切換頁面")
 def test_keyboard_can_activate_navigation_and_focus_is_visually_defined(qtbot) -> None:
-    window = MainWindow(SessionStub())  # type: ignore[arg-type]
+    window = MainWindow(
+        SessionStub(),
+        diagnostic_service_factory=DiagnosticsStub,
+    )  # type: ignore[arg-type]
     qtbot.addWidget(window)
     window.show()
     button = window.app_shell.nav_buttons["diagnostics"]
@@ -113,7 +119,7 @@ def test_keyboard_can_activate_navigation_and_focus_is_visually_defined(qtbot) -
 
 @pytest.mark.scenario("desktop-ui-design", "顯示待開發項目")
 @pytest.mark.scenario("desktop-app-shell", "查看拳擊測量項目")
-def test_home_has_two_available_items_and_three_pending_items(qtbot) -> None:
+def test_home_has_three_available_items_and_two_pending_items(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
 
@@ -126,10 +132,11 @@ def test_home_has_two_available_items_and_three_pending_items(qtbot) -> None:
     )
     assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
     assert "可使用" in window.home_page.punch_buttons["拳頭速度"].text()
+    assert "可使用" in window.home_page.punch_buttons["拳種辨識"].text()
     assert all(
         "待開發" in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name not in {"出拳次數", "拳頭速度"}
+        if name not in {"出拳次數", "拳頭速度", "拳種辨識"}
     )
     assert not any("拳型辨識" in button.text() for button in window.home_page.punch_buttons.values())
 
@@ -218,12 +225,13 @@ def test_each_decided_item_builds_its_required_two_placement_fields(qtbot) -> No
         "出拳次數": ("左手腕", "右手腕"),
         "拳頭速度": ("左手腕", "右手腕"),
         "出拳軌跡": ("左手腕", "右手腕"),
-        "拳種辨識": ("左手把背面", "右手把背面"),
+        "拳種辨識": ("左手拳靶背面", "右手拳靶背面"),
     }
     for item_name, placement_names in expected.items():
         page = make_punch_page(qtbot, item_name)
         assert tuple(placement.name for placement in page._source_selectors.values()) == placement_names
-        assert all(selector.count() == len(SOURCES) + 1 for selector in page._source_selectors)
+        expected_count = 1 if item_name == "拳種辨識" else len(SOURCES) + 1
+        assert all(selector.count() == expected_count for selector in page._source_selectors)
 
 
 @pytest.mark.scenario("desktop-ui-design", "IMU 尚未完成分配")
@@ -269,18 +277,76 @@ def test_punch_force_explains_that_configuration_is_pending(qtbot) -> None:
 
 
 @pytest.mark.scenario("imu-source-discovery", "完成所有必要位置的分配並繼續")
-def test_valid_distinct_assignments_show_pending_and_clear_discovery(qtbot) -> None:
-    page = make_punch_page(qtbot, "拳種辨識")
+@pytest.mark.scenario("punch-classification-analysis", "user 準備進行拳種辨識")
+@pytest.mark.scenario("punch-classification-analysis", "user 尚未完成安裝確認")
+def test_valid_distinct_classification_assignments_require_installation_confirmation(qtbot) -> None:
+    sources = (
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=1, node_id=0),
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=1, node_id=1),
+    )
+    page = make_punch_page(qtbot, "拳種辨識", sources)
     first, second = page._source_selectors
     first.setCurrentIndex(1)
     second.setCurrentIndex(2)
+    assert not page.continue_button.isEnabled()
+    assert "確認" in page.message.text()
+
+    page.installation_confirmation.setChecked(True)
     assert page.continue_button.isEnabled()
 
-    page.continue_button.click()
 
-    assert page.status.text() == "拳種辨識：待開發"
-    assert page.service.clear_count == 1
-    assert len(page._source_selectors) == 0
+@pytest.mark.scenario("punch-classification-analysis", "user 選擇不同 Gateway 的 IMU")
+def test_classification_rejects_nodes_from_different_gateways(qtbot) -> None:
+    sources = (
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=1, node_id=0),
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=1, node_id=1),
+        ImuSource("COM7", ConnectionType.WIRELESS_RECEIVER, group_id=2, node_id=0),
+        ImuSource("COM7", ConnectionType.WIRELESS_RECEIVER, group_id=2, node_id=1),
+    )
+    page = make_punch_page(qtbot, "拳種辨識", sources)
+    first, second = page._source_selectors
+    first.setCurrentIndex(1)
+    second.setCurrentIndex(3)
+    page.installation_confirmation.setChecked(True)
+    assert not page.continue_button.isEnabled()
+    assert "同一個無線接收器" in page.message.text()
+
+
+@pytest.mark.scenario("punch-classification-analysis", "Backend 回傳有效 Result")
+@pytest.mark.scenario("punch-classification-analysis", "模型信心偏低")
+def test_classification_result_shows_six_counts_and_model_confidence(qtbot) -> None:
+    from types import SimpleNamespace
+
+    class Flow:
+        def validate_completed(self, _payload):
+            return SimpleNamespace(
+                session_id="classification-session",
+                analysis_id="classification-analysis",
+                result={
+                    "algorithm_version": "mitt_tcn_bilstm_lstm_v1",
+                    "total_punch_count": 1,
+                    "counts_by_type": {
+                        "left_hook": 0, "left_jab": 1, "left_upper": 0,
+                        "right_hook": 0, "right_jab": 0, "right_upper": 0,
+                    },
+                    "punches": [{
+                        "punch_index": 1, "punch_type": "left_jab",
+                        "start_elapsed_us": 1_000_000,
+                        "end_elapsed_us": 1_200_000,
+                        "confidence": 0.73,
+                    }],
+                },
+            )
+
+    page = PunchItemPage("拳種辨識", analysis_flow=Flow())
+    qtbot.addWidget(page)
+    page._analysis_status_ready({"status": "completed"})
+    visible = " ".join(label.text() for label in page.findChildren(QLabel))
+    assert "總拳數：1" in visible
+    assert "左刺拳：1" in visible
+    assert page.result_table.item(0, 1).text() == "左刺拳"
+    assert page.result_table.item(0, 4).text() == "73.0%"
+    assert page.continue_button.text() == "重新測量"
 
 
 @pytest.mark.scenario("desktop-ui-design", "使用鍵盤分配 IMU")

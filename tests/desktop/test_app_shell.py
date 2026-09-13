@@ -240,10 +240,11 @@ def test_successful_restore_opens_authenticated_home(qtbot) -> None:
     assert tuple(window.home_page.punch_buttons) == text.PUNCH_ITEMS
     assert "可使用" in window.home_page.punch_buttons["出拳次數"].text()
     assert "可使用" in window.home_page.punch_buttons["拳頭速度"].text()
+    assert "可使用" in window.home_page.punch_buttons["拳種辨識"].text()
     assert all(
         text.PENDING in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name not in {"出拳次數", "拳頭速度"}
+        if name not in {"出拳次數", "拳頭速度", "拳種辨識"}
     )
 
 

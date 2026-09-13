@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import inspect
 from datetime import datetime
 
 from bap_common.analysis_contracts import ContractError
 from bap_backend.app.repositories import AnalysisSessionRepository
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
+from bap_backend.app.services.punch_classification import PunchClassificationInputDescriptor
 
 
 class AnalysisDispatcher:
@@ -39,10 +41,31 @@ class AnalysisDispatcher:
                     executor = self.registry.executor(job.analysis_type, job.spec_version)
                     if executor is None:
                         raise ContractError("executor_unavailable", "此分析功能尚未提供")
-                    result = executor.execute(
-                        inputs={binding.input_role: binding.csv_file.csv_blob for binding in job.input_bindings},
-                        parameters=json.loads(job.parameters_json),
-                    )
+                    inputs = {
+                        binding.input_role: binding.csv_file.csv_blob
+                        for binding in job.input_bindings
+                    }
+                    arguments = {
+                        "inputs": inputs,
+                        "parameters": json.loads(job.parameters_json),
+                    }
+                    # Older executors and injected test doubles keep the original
+                    # two-argument interface.  Descriptor-aware analyses opt in
+                    # explicitly so existing analyses remain compatible.
+                    if "input_descriptors" in inspect.signature(executor.execute).parameters:
+                        arguments["input_descriptors"] = {
+                            binding.input_role: PunchClassificationInputDescriptor(
+                                csv_id=binding.csv_file.id,
+                                source_id=binding.csv_file.source_id,
+                                port=binding.csv_file.port,
+                                connection_type=binding.csv_file.connection_type,
+                                baud_rate=binding.csv_file.baud_rate,
+                                group_id=binding.csv_file.group_id,
+                                node_id=binding.csv_file.node_id,
+                            )
+                            for binding in job.input_bindings
+                        }
+                    result = executor.execute(**arguments)
                     specification.validate_result(result)
                     repository.save_result(job, result, self.clock())
                     completed += 1

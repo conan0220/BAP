@@ -13,6 +13,7 @@ from bap_desktop.services.imu_scan import (
     ScanStatus,
 )
 from bap_desktop.ui.punch_items import PunchItemPage
+from tests.helpers import build_gateway_frame, build_gateway_node
 
 
 def make_result(port: str, raw: bytes, connection_type: ConnectionType) -> PortScanResult:
@@ -134,7 +135,10 @@ def test_page_shows_reasons_and_can_retry(qtbot) -> None:
 
 
 @pytest.mark.scenario("imu-source-discovery", "選擇無線 Node")
-def test_page_selects_one_wireless_node(qtbot, gateway_frame) -> None:
+def test_page_selects_two_wireless_nodes_for_classification(qtbot) -> None:
+    gateway_frame = build_gateway_frame(
+        nodes=(build_gateway_node(1), build_gateway_node(2)),
+    )
     service = ImuDiscoveryService(
         adapter=object(),
         duration_seconds=0.01,
@@ -146,11 +150,14 @@ def test_page_selects_one_wireless_node(qtbot, gateway_frame) -> None:
     qtbot.addWidget(page)
     page.show()
     qtbot.waitUntil(lambda: len(page._source_selectors) == 2, timeout=1000)
-    selector = list(page._source_selectors)[0]
-    selector.setCurrentIndex(1)
+    left_selector, right_selector = list(page._source_selectors)
+    left_selector.setCurrentIndex(1)
+    right_selector.setCurrentIndex(2)
 
-    source = page.assignments["holder_left_pad"]
-    assert source.port == "COM7"
-    assert source.group_id is not None
-    assert source.node_id is not None
+    left = page.assignments["holder_left_pad"]
+    right = page.assignments["holder_right_pad"]
+    assert left.port == right.port == "COM7"
+    assert left.group_id == right.group_id == 3
+    assert left.node_id == 1
+    assert right.node_id == 2
     assert not page.continue_button.isEnabled()

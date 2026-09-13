@@ -49,6 +49,16 @@ git switch -c feature/<功能名稱>
 
 Analysis Session、Common IMU CSV 或 Backend 分析流程的開發方式，請見 [Analysis Session 開發與除錯指南](docs/guides/analysis-session-development.md)；資料格式與名詞請見 [拳擊分析 Session 與資料契約](docs/knowledge/analysis-session.md)。
 
+### 拳種辨識模型
+
+Backend Production 使用已轉換且通過 parity check 的 ONNX Model Bundle，不會載入不受信任的 PyTorch checkpoint。需要重新轉換時，先在隔離的可信任 Python 環境安裝 `torch`、`onnx`、`onnxruntime` 與 `numpy`，再執行：
+
+~~~powershell
+python tools/ml/convert_punch_classification_models.py --handover-root "<許明騏交接資料夾>" --output "bap_backend/app/analysis_models/punch_classification/v1" --node1-role holder_left_pad --node2-role holder_right_pad
+~~~
+
+轉換工具會同時驗證 PyTorch 與 ONNX 的 logits、labels，並輸出 checksums、normalization 與固定 reference outputs。完整交接資料、研究 checkpoint、論文與資料集不得加入 Git 或 Backend Artifact；模型來源、安裝方式與限制請見 [拳種辨識 Model Card](docs/model-cards/punch-classification-v1.md)。
+
 ### 3. Commit 並 push feature branch
 
 ~~~powershell

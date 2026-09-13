@@ -7,6 +7,7 @@ from threading import Event
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QAbstractItemView,
     QFrame,
     QGridLayout,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from bap_desktop.resources import text
 from bap_desktop.services.imu_discovery import DiscoveryResult, ImuDiscoveryService, ImuSource
+from bap_desktop.services.imu_scan import ConnectionType
 from bap_desktop.services.analysis_flow import AnalysisFlowService
 from bap_desktop.services.analysis_recording import LiveAnalysisRecording, RecordingError, SessionDraft
 from bap_common.analysis_session import SessionStopReason
@@ -84,7 +86,9 @@ class PunchItemPage(QWidget):
         super().__init__(parent)
         self.item_name = item_name
         self.definition = get_punch_item_definition(item_name)
-        self._is_available_item = self.definition.analysis_type in {"punch_count", "punch_speed"}
+        self._is_available_item = self.definition.analysis_type in {
+            "punch_count", "punch_speed", "punch_classification"
+        }
         self.service = service or ImuDiscoveryService()
         self.analysis_flow = analysis_flow
         self.recording_root = recording_root
@@ -127,6 +131,13 @@ class PunchItemPage(QWidget):
         self.message.setObjectName("warningMessage")
         self.message.setWordWrap(True)
         self.message.setVisible(False)
+        self.installation_confirmation = QCheckBox(
+            "我已確認 Node1 裝在持靶人左手拳靶背面、Node2 裝在右手拳靶背面，\n"
+            "IMU 固定板與感測器方向和配置圖一致；結果中的左右手是拳擊手的手別。"
+        )
+        self.installation_confirmation.setAccessibleName("確認拳靶 IMU 安裝位置與方向")
+        self.installation_confirmation.setVisible(False)
+        self.installation_confirmation.toggled.connect(self._validate_assignments)
         self.sources_container = QWidget()
         self.sources_layout = QVBoxLayout(self.sources_container)
         self.sources_layout.setContentsMargins(0, 0, 0, 0)
@@ -161,6 +172,7 @@ class PunchItemPage(QWidget):
             self.status,
             self.progress,
             self.message,
+            self.installation_confirmation,
             self.sources_container,
             self.duration_row,
             self.timer_details,
@@ -211,6 +223,8 @@ class PunchItemPage(QWidget):
         self._clear_source_selectors()
         self.message.clear()
         self.message.setVisible(False)
+        self.installation_confirmation.setChecked(False)
+        self.installation_confirmation.setVisible(False)
         self.status.setText(text.DISCOVERY_RUNNING)
         self.progress.setVisible(True)
         self.continue_button.setEnabled(False)
@@ -250,17 +264,44 @@ class PunchItemPage(QWidget):
             return
 
         self.status.setText(text.DISCOVERY_SELECT)
+        sources = self._eligible_sources(result.sources)
+        self._latest_sources = sources
+        if self.definition.analysis_type == "punch_classification":
+            self.status.setText(
+                "請指定同一個無線接收器與 Group 下的兩顆不同 IMU。"
+                "Node1 是持靶人左手拳靶；Node2 是持靶人右手拳靶。"
+            )
+            self.installation_confirmation.setVisible(True)
         for placement in self.definition.placements:
-            self._add_assignment_row(placement, result.sources)
+            self._add_assignment_row(placement, sources)
         selectors = list(self._source_selectors)
         for current, following in zip(selectors, selectors[1:]):
             QWidget.setTabOrder(current, following)
         if selectors:
             QWidget.setTabOrder(selectors[-1], self.continue_button)
-        if len(result.sources) < len(self.definition.placements):
+        if len(sources) < len(self.definition.placements):
             self.message.setText(text.DISCOVERY_INSUFFICIENT)
             self.message.setVisible(True)
         self._validate_assignments()
+
+    def _eligible_sources(self, sources: tuple[ImuSource, ...]) -> tuple[ImuSource, ...]:
+        if self.definition.analysis_type != "punch_classification":
+            return sources
+        wireless = tuple(
+            source for source in sources
+            if source.connection_type is ConnectionType.WIRELESS_RECEIVER
+            and source.group_id is not None
+            and source.node_id is not None
+        )
+        groups: dict[tuple[str, int], set[int]] = {}
+        for source in wireless:
+            groups.setdefault((source.port, int(source.group_id)), set()).add(int(source.node_id))
+        eligible = {key for key, nodes in groups.items() if len(nodes) >= 2}
+        return tuple(
+            source
+            for source in wireless
+            if (source.port, int(source.group_id)) in eligible
+        )
 
     def _add_assignment_row(
         self,
@@ -320,8 +361,29 @@ class PunchItemPage(QWidget):
 
         complete = len(self.assignments) == len(self.definition.placements) > 0
         unique = len(set(selected)) == len(selected)
+        same_gateway = True
+        if self.definition.analysis_type == "punch_classification" and len(selected) == 2:
+            left, right = selected
+            same_gateway = (
+                left.connection_type is ConnectionType.WIRELESS_RECEIVER
+                and right.connection_type is ConnectionType.WIRELESS_RECEIVER
+                and left.port == right.port
+                and left.group_id is not None
+                and left.group_id == right.group_id
+                and left.node_id != right.node_id
+            )
+        confirmed = (
+            self.definition.analysis_type != "punch_classification"
+            or self.installation_confirmation.isChecked()
+        )
         if not unique:
             self.message.setText(text.DISCOVERY_DUPLICATE)
+            self.message.setVisible(True)
+        elif not same_gateway:
+            self.message.setText("左右拳靶必須選擇同一個無線接收器與 Group 下的不同 Node。")
+            self.message.setVisible(True)
+        elif complete and not confirmed:
+            self.message.setText("請先確認兩顆 IMU 的安裝位置、方向與左右定義。")
             self.message.setVisible(True)
         elif len(self._latest_sources) < len(self.definition.placements):
             self.message.setText(text.DISCOVERY_INSUFFICIENT)
@@ -329,7 +391,7 @@ class PunchItemPage(QWidget):
         else:
             self.message.clear()
             self.message.setVisible(False)
-        self.continue_button.setEnabled(complete and unique)
+        self.continue_button.setEnabled(complete and unique and same_gateway and confirmed)
 
     @Slot(str)
     def _show_error(self, message: str) -> None:
@@ -361,6 +423,11 @@ class PunchItemPage(QWidget):
         selected = tuple(self.assignments.values())
         if len(selected) != required or len(set(selected)) != required:
             return
+        if (
+            self.definition.analysis_type == "punch_classification"
+            and not self.installation_confirmation.isChecked()
+        ):
+            return
         if self.analysis_flow is None:
             self._show_unavailable()
             return
@@ -381,6 +448,7 @@ class PunchItemPage(QWidget):
             self._show_unavailable()
             return
         self._clear_source_selectors()
+        self.installation_confirmation.setVisible(False)
         self.message.setVisible(False)
         if self.definition.analysis_type == "punch_speed":
             self.status.setText(
@@ -654,6 +722,47 @@ class PunchItemPage(QWidget):
         self._show_analysis_result(validated.result)
 
     def _show_analysis_result(self, result: dict) -> None:
+        if self.definition.analysis_type == "punch_classification":
+            labels = {
+                "left_jab": "左刺拳",
+                "right_jab": "右刺拳",
+                "left_hook": "左鉤拳",
+                "right_hook": "右鉤拳",
+                "left_upper": "左上鉤拳",
+                "right_upper": "右上鉤拳",
+            }
+            summary = QLabel(f"總拳數：{result['total_punch_count']}")
+            summary.setObjectName("sectionTitle")
+            self.sources_layout.addWidget(summary)
+            counts = result["counts_by_type"]
+            for punch_type in (
+                "left_jab", "right_jab", "left_hook", "right_hook",
+                "left_upper", "right_upper",
+            ):
+                self.sources_layout.addWidget(
+                    QLabel(f"{labels[punch_type]}：{counts[punch_type]}")
+                )
+            punches = list(result.get("punches", ()))
+            self.result_table = QTableWidget(len(punches), 5)
+            self.result_table.setAccessibleName("每一拳的拳種辨識結果")
+            self.result_table.setHorizontalHeaderLabels(
+                ("拳序", "拳種", "開始時間", "結束時間", "模型信心")
+            )
+            self.result_table.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.Stretch
+            )
+            for row, punch in enumerate(punches):
+                values = (
+                    str(punch["punch_index"]),
+                    labels[punch["punch_type"]],
+                    f"{int(punch['start_elapsed_us']) / 1_000_000:.3f} 秒",
+                    f"{int(punch['end_elapsed_us']) / 1_000_000:.3f} 秒",
+                    f"{float(punch['confidence']):.1%}",
+                )
+                for column, value in enumerate(values):
+                    self.result_table.setItem(row, column, QTableWidgetItem(value))
+            self.sources_layout.addWidget(self.result_table)
+            return
         if self.definition.analysis_type == "punch_speed":
             summaries = (
                 ("左手", "left_punch_count", "left_average_speed_mps", "left_max_speed_mps"),

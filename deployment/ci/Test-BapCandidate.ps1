@@ -122,6 +122,11 @@ with factory() as session:
     $LoginBody = @{ username = "LegacyBoxer"; password = "boxing123" } | ConvertTo-Json
     $LegacyLogin = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:12345/api/v1/auth/login" -ContentType "application/json" -Body $LoginBody -TimeoutSec 10
     if (-not $LegacyLogin.access_token) { throw "Existing account did not survive migration rehearsal." }
+    & $Python -m bap_backend.tools.test_punch_classification_api `
+        --api-base-url "http://127.0.0.1:12345/api/" `
+        --username "LegacyBoxer" `
+        --password "boxing123"
+    if ($LASTEXITCODE -ne 0) { throw "Punch classification Artifact E2E failed." }
     $ExistingRelease = Invoke-RestMethod -Uri "http://127.0.0.1:12345/api/v1/releases/latest?platform=windows" -TimeoutSec 10
     if ($ExistingRelease.source_tree_sha -ne $SourceTreeSha) { throw "Existing update metadata did not survive migration rehearsal." }
 

@@ -7,6 +7,10 @@ from zipfile import ZipFile
 import pytest
 
 from bap_backend.deployment.artifact import validate_zip
+from bap_backend.app.services.punch_classification import (
+    PunchClassificationModelBundle,
+    default_model_bundle_path,
+)
 
 
 COMMIT_SHA = "a" * 40
@@ -37,6 +41,21 @@ def _zip(path, members: dict[str, str]) -> None:
 @pytest.mark.scenario("backend-automatic-deployment", "CI 建立 Backend ZIP")
 def test_backend_artifact_allows_runtime_deployment_code() -> None:
     pass
+
+
+@pytest.mark.scenario("punch-classification-analysis", "部署轉換後的模型")
+def test_backend_source_contains_only_the_validated_production_model_bundle() -> None:
+    root = default_model_bundle_path()
+    assert {path.name for path in root.iterdir()} == {
+        "segmentation.onnx",
+        "classifier.onnx",
+        "normalization.npz",
+        "reference_outputs.npz",
+        "manifest.json",
+    }
+    PunchClassificationModelBundle(root)
+    assert not tuple(root.rglob("*.pt"))
+    assert not tuple(root.rglob("*.csv"))
 
 
 def test_backend_artifact_allows_only_unified_production_inputs(tmp_path) -> None:
