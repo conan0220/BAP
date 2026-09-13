@@ -9,9 +9,9 @@ from bap_backend.app.services.imu_motion import (
     MotionImuSample,
     PunchWindow,
     build_punch_windows,
+    calibration_and_measurement_indices,
     calibration_heading,
     integrate_window_velocity,
-    measurement_start_index,
     read_motion_imu_csv,
     rotate_world_to_session,
     validate_paired_headings,
@@ -105,8 +105,9 @@ def analyze_single_wrist_trajectories(
     session_heading: float,
     *,
     hand: str,
+    calibration_end_index: int,
 ) -> list[dict]:
-    world = world_linear_acceleration(samples, measurement_index)
+    world = world_linear_acceleration(samples, calibration_end_index)
     session_acceleration = rotate_world_to_session(world, session_heading)
     trajectories: list[dict] = []
     for punch_index, window in enumerate(build_punch_windows(samples, measurement_index), start=1):
@@ -123,23 +124,39 @@ class PunchTrajectoryExecutor:
     def execute(self, *, inputs: dict[str, bytes], parameters: dict) -> dict:
         if set(inputs) != {"left_wrist", "right_wrist"}:
             raise ContractError("missing_input_role", "出拳軌跡需要不同的左手腕與右手腕 CSV")
-        boundary = parameters.get("measurement_start_elapsed_us")
-        if isinstance(boundary, bool) or not isinstance(boundary, int) or boundary <= 0:
-            raise ContractError("invalid_parameter", "出拳軌跡缺少有效的正式測量開始時間")
+        calibration_end = parameters.get("calibration_end_elapsed_us")
+        measurement_start = parameters.get("measurement_start_elapsed_us")
+        if any(
+            isinstance(boundary, bool) or not isinstance(boundary, int) or boundary <= 0
+            for boundary in (calibration_end, measurement_start)
+        ) or calibration_end > measurement_start:
+            raise ContractError("invalid_parameter", "出拳軌跡的錄製時間邊界無效")
         try:
             left_samples = read_motion_imu_csv(inputs["left_wrist"])
             right_samples = read_motion_imu_csv(inputs["right_wrist"])
-            left_start = measurement_start_index(left_samples, boundary)
-            right_start = measurement_start_index(right_samples, boundary)
+            left_calibration_end, left_start = calibration_and_measurement_indices(
+                left_samples, calibration_end, measurement_start
+            )
+            right_calibration_end, right_start = calibration_and_measurement_indices(
+                right_samples, calibration_end, measurement_start
+            )
             heading = validate_paired_headings(
-                calibration_heading(left_samples, left_start),
-                calibration_heading(right_samples, right_start),
+                calibration_heading(left_samples, left_calibration_end),
+                calibration_heading(right_samples, right_calibration_end),
             )
             left = analyze_single_wrist_trajectories(
-                left_samples, left_start, heading, hand="left"
+                left_samples,
+                left_start,
+                heading,
+                hand="left",
+                calibration_end_index=left_calibration_end,
             )
             right = analyze_single_wrist_trajectories(
-                right_samples, right_start, heading, hand="right"
+                right_samples,
+                right_start,
+                heading,
+                hand="right",
+                calibration_end_index=right_calibration_end,
             )
         except ImuMotionDataError as error:
             raise ContractError(error.code, error.message) from error

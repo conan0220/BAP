@@ -106,7 +106,7 @@ flowchart LR
 
 ### 4. 校正資料同時定義偏移與 Session heading
 
-Desktop 將 `punch_trajectory` version 2 納入和拳頭速度相同的兩階段錄製：先錄兩秒校正，再由 user 決定正式時間及開始正式測量。`measurement_start_elapsed_us` 是唯一分界，不另外建立第三份校正檔。
+Desktop 將 `punch_trajectory` version 2 納入和拳頭速度相同的兩階段錄製：先錄兩秒校正，再由 user 決定正式時間及開始正式測量。`calibration_end_elapsed_us` 固定校正資料的結束位置，`measurement_start_elapsed_us` 標示正式測量開始位置；中間等待 user 輸入時間、操作滑鼠或移動到準備姿勢的資料不參與校正穩定性判斷，也不算正式出拳。兩個階段仍保存在同一份 CSV，不另外建立第三份校正檔。
 
 Prototype 假設左右手腕 IMU 依 UI 示意以一致方向安裝。user 校正時面向預計出拳方向並保持準備姿勢；Backend 以校正 Quaternion 的穩定代表值建立 Session heading，將地球座標轉成：
 

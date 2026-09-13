@@ -24,6 +24,10 @@ from bap_common.imu_csv import COMMON_IMU_CSV_HEADER
 
 
 BOUNDARY_US = 2_000_000
+PARAMETERS = {
+    "calibration_end_elapsed_us": BOUNDARY_US,
+    "measurement_start_elapsed_us": BOUNDARY_US,
+}
 
 
 def speed_csv(
@@ -155,7 +159,7 @@ def test_incomplete_motion_at_end_is_not_reported_as_a_punch() -> None:
 @pytest.mark.scenario("punch-speed-analysis", "左右手輸入完整")
 def test_executor_is_deterministic_and_faster_pulse_has_higher_speed() -> None:
     inputs = {"left_wrist": speed_csv(amplitude_g=7.0), "right_wrist": speed_csv(amplitude_g=4.0)}
-    parameters = {"measurement_start_elapsed_us": BOUNDARY_US}
+    parameters = PARAMETERS
     executor = PunchSpeedExecutor()
     first = executor.execute(inputs=inputs, parameters=parameters)
     second = executor.execute(inputs=inputs, parameters=parameters)
@@ -174,7 +178,7 @@ def test_rapid_successive_and_simultaneous_left_right_punches_remain_separate() 
     payload = speed_csv(event_centers=(250, 300), rows=400)
     result = PunchSpeedExecutor().execute(
         inputs={"left_wrist": payload, "right_wrist": payload},
-        parameters={"measurement_start_elapsed_us": BOUNDARY_US},
+        parameters=PARAMETERS,
     )
     assert result["left_punch_count"] == 2
     assert result["right_punch_count"] == 2
@@ -187,7 +191,7 @@ def test_rapid_successive_and_simultaneous_left_right_punches_remain_separate() 
 def test_zero_punch_hand_has_zero_summary() -> None:
     result = PunchSpeedExecutor().execute(
         inputs={"left_wrist": speed_csv(event=False), "right_wrist": speed_csv()},
-        parameters={"measurement_start_elapsed_us": BOUNDARY_US},
+        parameters=PARAMETERS,
     )
     assert result["left_punch_count"] == 0
     assert result["left_average_speed_mps"] == result["left_max_speed_mps"] == 0.0
@@ -197,7 +201,10 @@ def test_zero_punch_hand_has_zero_summary() -> None:
 def test_motion_before_measurement_boundary_is_not_counted() -> None:
     result = PunchSpeedExecutor().execute(
         inputs={"left_wrist": speed_csv(), "right_wrist": speed_csv()},
-        parameters={"measurement_start_elapsed_us": 3_000_000},
+        parameters={
+            "calibration_end_elapsed_us": BOUNDARY_US,
+            "measurement_start_elapsed_us": 3_000_000,
+        },
     )
     assert result["total_punch_count"] == 0
 
@@ -250,7 +257,7 @@ def test_executor_requires_two_roles_and_valid_parameter() -> None:
     with pytest.raises(ContractError) as missing_role:
         executor.execute(
             inputs={"left_wrist": speed_csv()},
-            parameters={"measurement_start_elapsed_us": BOUNDARY_US},
+            parameters=PARAMETERS,
         )
     assert missing_role.value.code == "missing_input_role"
     with pytest.raises(ContractError) as missing_parameter:
@@ -262,7 +269,10 @@ def test_executor_requires_two_roles_and_valid_parameter() -> None:
 
 def test_analyze_single_wrist_returns_traceable_elapsed_times() -> None:
     punches = analyze_single_wrist(
-        speed_csv(), hand="left", measurement_start_elapsed_us=BOUNDARY_US
+        speed_csv(),
+        hand="left",
+        calibration_end_elapsed_us=BOUNDARY_US,
+        measurement_start_elapsed_us=BOUNDARY_US,
     )
     assert len(punches) == 1
     assert punches[0]["hand"] == "left"

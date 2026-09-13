@@ -23,6 +23,7 @@
 | desktop-ui-design | 電腦無法建立 3D 繪圖環境 | `tests/desktop/test_trajectory_view.py::test_opengl_failure_uses_text_fallback_without_losing_summary` |
 | punch-trajectory-analysis | user 準備校正 | `tests/desktop/test_desktop_ui_design.py::test_two_stage_ready_state_explains_calibration_and_manual_next_step` |
 | punch-trajectory-analysis | 校正完成後開始正式測量 | `tests/desktop/test_desktop_ui_design.py::test_two_stage_analysis_calibrates_before_formal_measurement` |
+| punch-trajectory-analysis | 校正完成後 user 移動到正式姿勢 | `tests/backend/test_punch_trajectory.py::test_movement_between_calibration_and_measurement_is_not_calibration` |
 | punch-trajectory-analysis | 校正期間 IMU 中斷 | `tests/desktop/test_desktop_ui_design.py::test_two_stage_calibration_interruption_returns_to_retry_state` |
 | punch-trajectory-analysis | 一場 Session 包含左右手多拳 | `tests/backend/test_punch_trajectory.py::test_executor_returns_contract_valid_isolated_trajectories` |
 | punch-trajectory-analysis | 正式資料沒有偵測到出拳 | `tests/backend/test_punch_trajectory.py::test_no_punch_is_a_successful_empty_result` |
@@ -33,10 +34,10 @@
 | punch-trajectory-analysis | 首次顯示有效軌跡 Result | `tests/desktop/test_trajectory_view.py::test_view_selects_earliest_punch_and_switches_locally` |
 | punch-trajectory-analysis | user 操作 3D 圖 | `tests/desktop/test_trajectory_view.py::test_camera_presets_are_keyboard_focusable_and_do_not_change_result` |
 | punch-trajectory-analysis | user 切換手別或拳次 | `tests/desktop/test_trajectory_view.py::test_view_selects_earliest_punch_and_switches_locally` |
+| punch-speed-analysis | user 在兩個階段之間移動 | `tests/desktop/test_analysis_recording.py::test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters` |
 
 ## 額外防護
 
 - `tests/backend/test_punch_trajectory.py::test_non_finite_sensor_value_never_returns_a_fake_trajectory` 驗證非有限 sensor 值不會產生假軌跡。
 - `tests/backend/test_analysis_sessions_api.py` 驗證完整 HTTP Session、資料庫 Result、原始 CSV checksum、失敗後重試。
 - `python -m bap_desktop.app --smoke-test` 驗證真正的 Qt/OpenGL Widget 與強制 fallback；正式 Windows Artifact 仍須再執行相同 smoke test。
-

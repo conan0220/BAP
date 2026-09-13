@@ -17,7 +17,7 @@
 ## ADDED Requirements
 
 ### Requirement: 出拳軌跡必須使用左右手腕資料與明確校正階段
-`punch_trajectory` version 2 MUST 要求不同的 `left_wrist` 與 `right_wrist` Common IMU CSV。Desktop App MUST 在正式測量以前錄製兩秒校正資料，並 MUST 以 `measurement_start_elapsed_us` 標示校正結束及正式資料開始的位置。
+`punch_trajectory` version 2 MUST 要求不同的 `left_wrist` 與 `right_wrist` Common IMU CSV。Desktop App MUST 在正式測量以前錄製兩秒校正資料，MUST 以 `calibration_end_elapsed_us` 標示校正資料結束的位置，並 MUST 以 `measurement_start_elapsed_us` 標示 user 按下按鈕後正式資料開始的位置。兩個時間點之間的等待與準備動作 MUST NOT 被 Backend 當成校正資料或正式出拳。
 
 #### Scenario: user 準備校正
 - **WHEN** user 已為左、右手腕分配不同 IMU，且 Backend 回報 `punch_trajectory` version 2 可執行
@@ -30,7 +30,8 @@
 - **THEN** Desktop App 說明校正已完成
 - **AND** 讓 user 輸入 5 至 3600 秒的正式錄製時間
 - **AND** 等 user 按下「開始正式測量」後才開始計算正式錄製時間
-- **AND** Session Metadata 的 Analysis Parameters 包含有效的 `measurement_start_elapsed_us`
+- **AND** Session Metadata 的 Analysis Parameters 包含有效的 `calibration_end_elapsed_us` 與 `measurement_start_elapsed_us`
+- **AND** user 在兩個時間點之間的操作或準備動作不影響校正穩定性判斷
 
 #### Scenario: 校正期間 IMU 中斷
 - **WHEN** 任一必要 IMU 在校正完成以前中斷
@@ -80,7 +81,7 @@ Backend MUST 驗證必要欄位、時間順序、Quaternion、校正資料與取
 - **AND** 不顯示軌跡圖
 
 #### Scenario: 校正資料不足
-- **WHEN** `measurement_start_elapsed_us` 以前沒有足夠的靜止校正資料
+- **WHEN** `calibration_end_elapsed_us` 以前沒有足夠的靜止校正資料
 - **THEN** Backend 拒絕產生軌跡 Result
 - **AND** Desktop App 以白話說明校正資料不足
 
@@ -105,4 +106,3 @@ Desktop App MUST 讓 user 選擇手別與拳次，並以同一個互動式 3D �
 - **WHEN** user 選擇另一隻手或另一拳
 - **THEN** 3D 圖與摘要改為顯示所選軌跡
 - **AND** 不重新上傳 Session 或重新執行 Backend 分析
-

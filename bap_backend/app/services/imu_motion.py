@@ -232,6 +232,52 @@ def measurement_start_index(
     return index
 
 
+def calibration_and_measurement_indices(
+    samples: tuple[MotionImuSample, ...],
+    calibration_end_elapsed_us: int,
+    measurement_start_elapsed_us: int,
+    *,
+    config: MotionConfig = DEFAULT_MOTION_CONFIG,
+) -> tuple[int, int]:
+    """Resolve independent calibration and formal-measurement boundaries."""
+
+    if calibration_end_elapsed_us > measurement_start_elapsed_us:
+        raise ImuMotionDataError(
+            "invalid_recording_boundaries",
+            "校正結束時間不得晚於正式測量開始時間",
+        )
+    try:
+        calibration_end_index = next(
+            index
+            for index, sample in enumerate(samples)
+            if sample.elapsed_us >= calibration_end_elapsed_us
+        )
+    except StopIteration as error:
+        raise ImuMotionDataError(
+            "invalid_calibration_boundary", "校正結束時間不在 IMU 資料範圍內"
+        ) from error
+    try:
+        measurement_index = next(
+            index
+            for index, sample in enumerate(samples)
+            if sample.elapsed_us >= measurement_start_elapsed_us
+        )
+    except StopIteration as error:
+        raise ImuMotionDataError(
+            "invalid_measurement_boundary", "正式測量開始時間不在 IMU 資料範圍內"
+        ) from error
+
+    calibration = samples[:calibration_end_index]
+    if len(calibration) < config.minimum_calibration_samples:
+        raise ImuMotionDataError("insufficient_calibration", "靜止校正資料不足，請重新測量")
+    calibration_span = calibration[-1].time_seconds - calibration[0].time_seconds
+    if calibration_span < config.minimum_calibration_seconds:
+        raise ImuMotionDataError("insufficient_calibration", "靜止校正時間不足，請重新測量")
+    if len(samples) - measurement_index < 3:
+        raise ImuMotionDataError("insufficient_imu_samples", "正式測量資料不足，請重新測量")
+    return calibration_end_index, measurement_index
+
+
 def build_punch_windows(
     samples: tuple[MotionImuSample, ...], measurement_index: int
 ) -> tuple[PunchWindow, ...]:

@@ -258,7 +258,12 @@ def valid_punch_speed_result() -> dict:
 def test_punch_speed_v2_contract_accepts_complete_result_and_parameter() -> None:
     specification = punch_speed_specification()
     assert specification.display_name == "拳頭速度"
-    specification.validate_parameters({"measurement_start_elapsed_us": 2_000_000})
+    specification.validate_parameters(
+        {
+            "calibration_end_elapsed_us": 2_000_000,
+            "measurement_start_elapsed_us": 2_000_000,
+        }
+    )
     specification.validate_result(valid_punch_speed_result())
 
 
@@ -299,6 +304,21 @@ def test_punch_speed_v2_contract_rejects_inconsistent_summary() -> None:
 
 def test_punch_speed_v2_contract_requires_valid_measurement_boundary() -> None:
     specification = punch_speed_specification()
-    for parameters in ({}, {"measurement_start_elapsed_us": 0}, {"measurement_start_elapsed_us": True}):
+    for parameters in (
+        {},
+        {"calibration_end_elapsed_us": 2_000_000},
+        {
+            "calibration_end_elapsed_us": 0,
+            "measurement_start_elapsed_us": 2_000_000,
+        },
+        {
+            "calibration_end_elapsed_us": True,
+            "measurement_start_elapsed_us": 2_000_000,
+        },
+        {
+            "calibration_end_elapsed_us": 3_000_000,
+            "measurement_start_elapsed_us": 2_000_000,
+        },
+    ):
         with pytest.raises(ContractError):
             specification.validate_parameters(parameters)
