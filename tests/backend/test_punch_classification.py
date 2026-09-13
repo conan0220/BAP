@@ -35,6 +35,7 @@ def _csv_bytes(
     bad_column: str | None = None,
     sample_period_us: int = 2500,
     duplicate_key_at: int | None = None,
+    conflicting_duplicate_at: int | None = None,
 ) -> bytes:
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=COMMON_IMU_CSV_HEADER, lineterminator="\n")
@@ -51,7 +52,7 @@ def _csv_bytes(
             elapsed_us=index * sample_period_us,
             device_time_ms=10_000 + key_index,
             frame_type="0x91",
-            acc_x_g="0.01",
+            acc_x_g="0.99" if conflicting_duplicate_at == index else "0.01",
             acc_y_g="0.02",
             acc_z_g="1.0",
             gyro_x_dps="0.1",
@@ -178,13 +179,25 @@ def test_sync_rejects_low_sample_rate():
     assert error.value.code == "invalid_sample_rate"
 
 
-def test_sync_rejects_duplicate_gateway_packet_key():
+def test_sync_drops_identical_duplicate_gateway_packet_key():
+    synchronized = synchronize_inputs({
+        "holder_left_pad": _csv_bytes(duplicate_key_at=100),
+        "holder_right_pad": _csv_bytes(),
+    })
+    assert len(synchronized.elapsed_us) == 399
+    assert synchronized.pair_ratio == pytest.approx(399 / 400)
+
+
+def test_sync_rejects_conflicting_duplicate_gateway_packet_key():
     with pytest.raises(ContractError) as error:
         synchronize_inputs({
-            "holder_left_pad": _csv_bytes(duplicate_key_at=100),
+            "holder_left_pad": _csv_bytes(
+                duplicate_key_at=100,
+                conflicting_duplicate_at=100,
+            ),
             "holder_right_pad": _csv_bytes(),
         })
-    assert error.value.code == "duplicate_sync_key"
+    assert error.value.code == "conflicting_duplicate_sync_key"
 
 
 @pytest.mark.scenario("punch-classification-analysis", "部署轉換後的模型")

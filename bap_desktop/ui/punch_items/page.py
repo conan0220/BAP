@@ -415,6 +415,8 @@ class PunchItemPage(QWidget):
             self._upload_and_wait()
         elif self._measurement_state == "poll_failed":
             self._poll_status()
+        elif self._measurement_state == "analysis_failed":
+            self.start_discovery()
         elif self._measurement_state == "completed":
             self.start_discovery()
 
@@ -699,14 +701,28 @@ class PunchItemPage(QWidget):
             QTimer.singleShot(1000, self._poll_again)
             return
         if state == "failed":
-            self._measurement_state = "failed"
+            self._measurement_state = "analysis_failed"
             self.status.setText(payload.get("safe_error_message") or "Backend 分析失敗")
+            self.analysis_chip.setText("分析失敗")
+            self.duration_input.setEnabled(True)
+            self.duration_row.setVisible(False)
+            self.timer_details.setVisible(False)
+            self.continue_button.setText("重新測量")
+            self.continue_button.setAccessibleName("重新測量並再次檢測 IMU")
+            self.continue_button.setEnabled(True)
             return
         try:
             validated = self.analysis_flow.validate_completed(payload)
         except Exception:
-            self._measurement_state = "failed"
+            self._measurement_state = "analysis_failed"
             self.status.setText("Backend 回傳的 Result 格式不正確")
+            self.analysis_chip.setText("分析失敗")
+            self.duration_input.setEnabled(True)
+            self.duration_row.setVisible(False)
+            self.timer_details.setVisible(False)
+            self.continue_button.setText("重新測量")
+            self.continue_button.setAccessibleName("重新測量並再次檢測 IMU")
+            self.continue_button.setEnabled(True)
             return
         self._measurement_state = "completed"
         self.status.setText(f"分析完成｜Session {validated.session_id or self._draft.session_id}")
