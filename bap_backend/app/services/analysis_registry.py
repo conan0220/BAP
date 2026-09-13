@@ -8,7 +8,13 @@ from bap_common.analysis_contracts import AnalysisSpecification, ContractError
 
 
 class AnalysisExecutor(Protocol):
-    def execute(self, *, inputs: dict[str, bytes], parameters: dict) -> dict: ...
+    def execute(
+        self,
+        *,
+        inputs: dict[str, bytes],
+        parameters: dict,
+        input_descriptors: dict | None = None,
+    ) -> dict: ...
 
 
 class AnalysisRegistry:

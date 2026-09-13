@@ -22,6 +22,12 @@ from bap_backend.app.services.analysis_dispatcher import AnalysisDispatcher
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
 from bap_backend.app.services.punch_count import PunchCountExecutor
 from bap_backend.app.services.punch_speed import PunchSpeedExecutor
+from bap_backend.app.services.punch_classification import (
+    PunchClassificationBundleError,
+    PunchClassificationExecutor,
+    PunchClassificationModelBundle,
+    default_model_bundle_path,
+)
 from bap_common.analysis_contracts import builtin_analysis_specifications
 
 
@@ -33,6 +39,16 @@ def create_default_analysis_registry() -> AnalysisRegistry:
     registry = AnalysisRegistry(builtin_analysis_specifications())
     registry.register_executor("punch_count", 1, PunchCountExecutor())
     registry.register_executor("punch_speed", 2, PunchSpeedExecutor())
+    try:
+        bundle = PunchClassificationModelBundle(default_model_bundle_path())
+    except PunchClassificationBundleError:
+        # The capability remains visible but non-executable.  This makes a
+        # missing or damaged bundle safe instead of starting a broken executor.
+        pass
+    else:
+        registry.register_executor(
+            "punch_classification", 2, PunchClassificationExecutor(bundle)
+        )
     return registry
 
 

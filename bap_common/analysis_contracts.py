@@ -156,6 +156,64 @@ class AnalysisSpecification(BaseModel):
                 raise ContractError("invalid_result_value", "總拳數必須等於左右手拳數相加")
         if self.analysis_type == "punch_speed" and self.spec_version == 2:
             _validate_punch_speed_result(result)
+        if self.analysis_type == "punch_classification" and self.spec_version == 2:
+            _validate_punch_classification_result(result)
+
+
+PUNCH_CLASSIFICATION_TYPES = (
+    "left_hook",
+    "left_jab",
+    "left_upper",
+    "right_hook",
+    "right_jab",
+    "right_upper",
+)
+
+
+def _validate_punch_classification_result(result: dict[str, Any]) -> None:
+    if not result["algorithm_version"].strip():
+        raise ContractError("invalid_result_value", "拳種辨識缺少演算法版本")
+    counts = result["counts_by_type"]
+    if not isinstance(counts, dict) or set(counts) != set(PUNCH_CLASSIFICATION_TYPES):
+        raise ContractError("invalid_result_value", "拳種統計必須包含固定六種拳種")
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts.values()):
+        raise ContractError("invalid_result_value", "拳種數量必須是非負整數")
+    total = result["total_punch_count"]
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise ContractError("invalid_result_value", "總拳數必須是非負整數")
+    punches = result["punches"]
+    if len(punches) != total or sum(counts.values()) != total:
+        raise ContractError("invalid_result_value", "總拳數、拳種統計與明細不一致")
+    calculated = {name: 0 for name in PUNCH_CLASSIFICATION_TYPES}
+    previous_start = -1
+    expected_keys = {
+        "punch_index", "punch_type", "start_elapsed_us", "end_elapsed_us", "confidence"
+    }
+    for expected_index, punch in enumerate(punches, start=1):
+        if not isinstance(punch, dict) or set(punch) != expected_keys:
+            raise ContractError("invalid_result_value", "每拳辨識明細欄位不正確")
+        if punch["punch_index"] != expected_index or isinstance(punch["punch_index"], bool):
+            raise ContractError("invalid_result_value", "拳序必須從一開始連續增加")
+        punch_type = punch["punch_type"]
+        if punch_type not in calculated:
+            raise ContractError("invalid_result_value", "每拳明細包含未知拳種")
+        start, end = punch["start_elapsed_us"], punch["end_elapsed_us"]
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in (start, end)):
+            raise ContractError("invalid_result_value", "每拳時間必須是非負整數")
+        if start > end or start < previous_start:
+            raise ContractError("invalid_result_value", "每拳時間順序不正確")
+        confidence = punch["confidence"]
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(float(confidence))
+            or not 0.0 <= float(confidence) <= 1.0
+        ):
+            raise ContractError("invalid_result_value", "模型信心必須介於 0 與 1")
+        previous_start = start
+        calculated[punch_type] += 1
+    if calculated != counts:
+        raise ContractError("invalid_result_value", "拳種統計必須能由每拳明細重新計算")
 
 
 def _validate_punch_speed_result(result: dict[str, Any]) -> None:
@@ -304,5 +362,18 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
                 InputRoleSpecification(name="holder_right_pad", display_name="持靶人右手靶"),
             ),
             result_fields=(ResultFieldSpecification(name="summary", value_type=ResultValueType.OBJECT),),
+        ),
+        AnalysisSpecification(
+            analysis_type="punch_classification", spec_version=2, display_name="拳種辨識",
+            input_roles=(
+                InputRoleSpecification(name="holder_left_pad", display_name="持靶人左手拳靶"),
+                InputRoleSpecification(name="holder_right_pad", display_name="持靶人右手拳靶"),
+            ),
+            result_fields=(
+                ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="total_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="counts_by_type", value_type=ResultValueType.OBJECT),
+                ResultFieldSpecification(name="punches", value_type=ResultValueType.ARRAY),
+            ),
         ),
     )

@@ -19,6 +19,11 @@ from bap_backend.app.services.analysis_sessions import AnalysisSessionService
 from bap_backend.app.services.analysis_registry import AnalysisRegistry
 from bap_backend.app.services.punch_count import PunchCountExecutor
 from bap_backend.app.services.punch_speed import PunchSpeedExecutor
+from bap_backend.app.services.punch_classification import (
+    PunchClassificationExecutor,
+    PunchClassificationModelBundle,
+    default_model_bundle_path,
+)
 from bap_common.analysis_contracts import builtin_analysis_specifications
 from bap_common.analysis_session import (
     AnalysisInputBinding,
@@ -141,6 +146,57 @@ def build_punch_speed_package(
         session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.14",
         started_at=now, ended_at=now, requested_duration_seconds=5,
         actual_duration_seconds=5.0, stop_reason=SessionStopReason.DURATION_REACHED,
+        csv_files=tuple(descriptors), analyses=(job,),
+    ), contents
+
+
+def punch_classification_csv(node_id: int) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(COMMON_IMU_CSV_HEADER)
+    for index in range(400):
+        writer.writerow((
+            index, index, index * 2_500, 10_000 + index, "0x91",
+            0.01 + node_id * 0.001, 0.02, 1.0,
+            0.1, 0.2, 0.3,
+            1.0, 2.0, 3.0,
+            0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 0.0,
+            "", "",
+        ))
+    return stream.getvalue().encode("utf-8")
+
+
+def build_punch_classification_package() -> tuple[SessionMetadata, dict[str, bytes]]:
+    contents = {
+        "holder-left.csv": punch_classification_csv(0),
+        "holder-right.csv": punch_classification_csv(1),
+    }
+    descriptors = []
+    for node_id, (name, data) in enumerate(contents.items()):
+        inspection = inspect_common_imu_csv_bytes(data)
+        descriptors.append(CsvDescriptor(
+            csv_id=uuid4(), filename=name,
+            source=ImuSourceDescriptor(
+                source_id=f"COM6:group-1:node-{node_id}", port="COM6",
+                connection_type=SourceConnectionType.WIRELESS_RECEIVER,
+                baud_rate=921600, group_id=1, node_id=node_id,
+            ),
+            row_count=inspection.row_count, size_bytes=inspection.size_bytes,
+            sha256=inspection.sha256,
+        ))
+    job = AnalysisJobRequest(
+        analysis_id=uuid4(), analysis_type="punch_classification", spec_version=2,
+        input_bindings=(
+            AnalysisInputBinding(input_role="holder_left_pad", csv_id=descriptors[0].csv_id),
+            AnalysisInputBinding(input_role="holder_right_pad", csv_id=descriptors[1].csv_id),
+        ),
+    )
+    now = datetime.now(timezone.utc)
+    return SessionMetadata(
+        session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.16",
+        started_at=now, ended_at=now, requested_duration_seconds=5,
+        actual_duration_seconds=1.0, stop_reason=SessionStopReason.ENDED_BY_USER,
         csv_files=tuple(descriptors), analyses=(job,),
     ), contents
 
@@ -461,6 +517,77 @@ def test_real_punch_speed_executor_completes_over_http(tmp_path):
         assert payload["status"] == "completed"
         assert payload["result"]["total_punch_count"] == 2
         assert payload["result"]["left_max_speed_mps"] > payload["result"]["right_max_speed_mps"] > 0
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-classification-analysis", "Session 沒有偵測到出拳")
+def test_real_punch_classification_executor_completes_over_http(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor(
+        "punch_classification",
+        2,
+        PunchClassificationExecutor(
+            PunchClassificationModelBundle(default_model_bundle_path())
+        ),
+    )
+    metadata, contents = build_punch_classification_package()
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/"
+            f"{metadata.analyses[0].analysis_id}",
+            headers=headers,
+        ).json()
+        assert payload["status"] == "completed"
+        assert payload["result"]["algorithm_version"] == "mitt_tcn_bilstm_lstm_v1"
+        assert payload["result"]["total_punch_count"] == 0
+        assert payload["result"]["total_punch_count"] == len(payload["result"]["punches"])
+        assert sum(payload["result"]["counts_by_type"].values()) == payload["result"]["total_punch_count"]
+        with factory() as session:
+            assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
+    engine.dispose()
+
+
+@pytest.mark.scenario("punch-classification-analysis", "左右 CSV 無法同步")
+@pytest.mark.scenario("punch-classification-analysis", "Backend 回傳分析失敗")
+def test_classification_failure_is_safe_and_keeps_original_csv(tmp_path):
+    client, factory, engine = make_context(tmp_path, with_executor=False)
+    client.app.state.analysis_registry.register_executor(
+        "punch_classification",
+        2,
+        PunchClassificationExecutor(
+            PunchClassificationModelBundle(default_model_bundle_path())
+        ),
+    )
+    metadata, contents = build_punch_classification_package()
+    # A valid CSV from a different packet stream cannot be synchronized.
+    contents["holder-right.csv"] = punch_classification_csv(1).replace(
+        b"0,0,0,10000,", b"0,900,0,10000,", 1
+    )
+    descriptor = metadata.csv_files[1]
+    inspection = inspect_common_imu_csv_bytes(contents["holder-right.csv"])
+    metadata = metadata.model_copy(update={
+        "csv_files": (
+            metadata.csv_files[0],
+            descriptor.model_copy(update={
+                "size_bytes": inspection.size_bytes,
+                "sha256": inspection.sha256,
+            }),
+        )
+    })
+    with client:
+        headers = authenticated(client)
+        assert upload(client, headers, metadata, contents).status_code == 202
+        payload = client.get(
+            f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/"
+            f"{metadata.analyses[0].analysis_id}", headers=headers,
+        ).json()
+        assert payload["status"] == "failed"
+        assert payload["result"] is None
+        assert "Traceback" not in payload["safe_error_message"]
         with factory() as session:
             assert session.scalar(select(func.count()).select_from(ImuCsvFile)) == 2
     engine.dispose()

@@ -1,0 +1,92 @@
+{
+  "bundle_version": 1,
+  "algorithm_version": "mitt_tcn_bilstm_lstm_v1",
+  "created_at": "2026-09-12T14:56:56.296316+00:00",
+  "runtime": "onnxruntime-cpu",
+  "sample_rate_hz": 400,
+  "role_mapping": {
+    "Node1": "holder_left_pad",
+    "Node2": "holder_right_pad"
+  },
+  "segmentation": {
+    "file": "segmentation.onnx",
+    "checkpoint_sha256": "828050393ce5b18a20c302c6eae168606bab343b1990cb29d251993f5f8ac42f",
+    "features": [
+      "Node1_AccX[G]",
+      "Node1_AccY[G]",
+      "Node1_AccZ[G]",
+      "Node1_GyrX[deg/s]",
+      "Node1_GyrY[deg/s]",
+      "Node1_GyrZ[deg/s]",
+      "Node1_MagX[uT]",
+      "Node1_MagY[uT]",
+      "Node1_MagZ[uT]",
+      "Node1_Roll[deg]",
+      "Node1_Pitch[deg]",
+      "Node1_Yaw[deg]",
+      "Node1_Qw",
+      "Node1_Qx",
+      "Node1_Qy",
+      "Node1_Qz",
+      "Node2_AccX[G]",
+      "Node2_AccY[G]",
+      "Node2_AccZ[G]",
+      "Node2_GyrX[deg/s]",
+      "Node2_GyrY[deg/s]",
+      "Node2_GyrZ[deg/s]",
+      "Node2_MagX[uT]",
+      "Node2_MagY[uT]",
+      "Node2_MagZ[uT]",
+      "Node2_Roll[deg]",
+      "Node2_Pitch[deg]",
+      "Node2_Yaw[deg]",
+      "Node2_Qw",
+      "Node2_Qx",
+      "Node2_Qy",
+      "Node2_Qz"
+    ],
+    "feature_count": 32,
+    "window_size": 384,
+    "stride": 128,
+    "minimum_segment_frames": 20,
+    "postprocess": "average_overlap_probabilities_then_positive_contiguous_min20",
+    "output_classes": 2
+  },
+  "classifier": {
+    "file": "classifier.onnx",
+    "checkpoint_sha256": "d6810d97f96de49ebf5b02a4abc19e85fe25e1a44da8110bbd4de9f78ce2d128",
+    "features": [
+      "AccX(1)[G]",
+      "AccY(1)[G]",
+      "AccZ(1)[G]",
+      "GyrX(1)[deg/s]",
+      "GyrY(1)[deg/s]",
+      "GyrZ(1)[deg/s]",
+      "AccX(2)[G]",
+      "AccY(2)[G]",
+      "AccZ(2)[G]",
+      "GyrX(2)[deg/s]",
+      "GyrY(2)[deg/s]",
+      "GyrZ(2)[deg/s]"
+    ],
+    "feature_count": 12,
+    "sequence_length": 96,
+    "labels": [
+      "left_hook",
+      "left_jab",
+      "left_upper",
+      "right_hook",
+      "right_jab",
+      "right_upper"
+    ],
+    "acceleration_mode": "gravity_quat_add"
+  },
+  "normalization_file": "normalization.npz",
+  "reference_outputs_file": "reference_outputs.npz",
+  "files": {
+    "segmentation.onnx": "350efa33619e8a9a35f378d70015a465abb46326232bc3c749f776919bc16a68",
+    "classifier.onnx": "c05405d1abba202e3981d17860c2aa044a7363ab58a9f47120bfa9b073471bc7",
+    "normalization.npz": "aae244fed5945605d4198594397999d9f8ffddaefd4611246893f1793b43a40e",
+    "reference_outputs.npz": "80ea3d9e399af4a9b30fe7b3563d0cfc29ce095232a55841b849208e3ff2b809"
+  }
+}

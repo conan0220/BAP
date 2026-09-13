@@ -58,7 +58,7 @@
 
 - [x] 7.1 執行格式、型別與完整 pytest suite，修正本 Change 造成的所有 regression，但不修改兩份 user PowerPoint 或 vendor material。
 - [x] 7.2 執行 OpenSpec strict validation，確認所有 Scenario 都有對應的 automated、contract、API E2E 或 Hardware test。
-- [ ] 7.3 以 CI 的同一台 Windows Runner 從 source 啟動真實 Backend，讓 Desktop API E2E 完成拳頭速度 Session flow，並確認失敗時會保存測試 logs。
+- [x] 7.3 以 CI 的同一台 Windows Runner 從 source 啟動真實 Backend，讓 Desktop API E2E 完成拳頭速度 Session flow，並確認失敗時會保存測試 logs。
 
 ## 8. 實際 IMU 人工驗證
 

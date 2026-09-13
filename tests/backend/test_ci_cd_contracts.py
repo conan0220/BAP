@@ -24,7 +24,9 @@ TREE = "c" * 40
     (
         (["docs/guide.md"], ChangeScope(True, False, False)),
         (["bap_backend/app/main.py"], ChangeScope(False, True, False)),
+        (["bap_backend/app/analysis_models/punch_classification/v1/classifier.onnx"], ChangeScope(False, True, False)),
         (["bap_desktop/app.py"], ChangeScope(False, False, True)),
+        (["bap_desktop/ui/punch_items/page.py"], ChangeScope(False, False, True)),
         (["bap_common/rules.py"], ChangeScope(False, True, True)),
         (["deployment/windows/backend/deploy.ps1"], ChangeScope(False, True, False)),
         (["tests/backend/test_deploy.py"], ChangeScope(False, True, False)),
