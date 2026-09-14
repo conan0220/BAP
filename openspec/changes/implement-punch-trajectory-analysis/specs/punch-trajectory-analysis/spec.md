@@ -85,8 +85,8 @@ Backend MUST 驗證必要欄位、時間順序、Quaternion、校正資料與取
 - **THEN** Backend 拒絕產生軌跡 Result
 - **AND** Desktop App 以白話說明校正資料不足
 
-### Requirement: Desktop App 必須以互動式 3D 圖顯示軌跡
-Desktop App MUST 讓 user 選擇手別與拳次，並以同一個互動式 3D 圖呈現該拳的軌跡。圖形 MUST 標示起點、終點與 X／Y／Z 方向，預設 MUST 使用使用者視角，並 MUST 提供可用鍵盤觸發的使用者視角、側面、上方與重設縮放操作。
+### Requirement: Desktop App 必須以內嵌 Matplotlib 互動式 3D 圖顯示軌跡
+Desktop App MUST 讓 user 選擇手別與拳次，並在目前的 BAP 結果頁面以內嵌 Matplotlib 3D 圖呈現該拳的軌跡，不得要求 user 開啟另一個程式視窗。圖形 MUST 標示起點、終點與 X／Y／Z 方向，預設 MUST 使用使用者視角，並 MUST 提供可用鍵盤觸發的使用者視角、側面、上方與重設縮放操作。
 
 #### Scenario: 首次顯示有效軌跡 Result
 - **WHEN** Desktop App 收到至少一拳且通過契約驗證的軌跡 Result

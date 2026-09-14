@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 import math
 from typing import Callable
 
-from PySide6.QtGui import QVector3D
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -17,81 +17,120 @@ from PySide6.QtWidgets import (
 )
 
 
-class PyqtgraphTrajectoryCanvas:
-    """Small adapter that keeps pyqtgraph/OpenGL details out of the page."""
+class MatplotlibTrajectoryCanvas:
+    """Embed a Matplotlib 3D figure without changing the Backend Result."""
 
     def __init__(self) -> None:
-        import numpy as np
-        import pyqtgraph.opengl as gl
+        # BAP uses DEBUG logs during local development. Matplotlib's font
+        # discovery emits hundreds of internal lines at that level, so keep
+        # the application log focused on actionable messages.
+        logging.getLogger("matplotlib").setLevel(logging.WARNING)
+        from matplotlib.backends.backend_qtagg import (
+            FigureCanvasQTAgg,
+            NavigationToolbar2QT,
+        )
+        from matplotlib.figure import Figure
 
-        self._np = np
-        self._gl = gl
-        self.widget = gl.GLViewWidget()
-        self.widget.setAccessibleName("互動式 3D 出拳軌跡")
-        self.widget.setMinimumHeight(300)
-        self.widget.setBackgroundColor((248, 249, 250, 255))
-        self._trajectory_items: list[object] = []
+        self.widget = QWidget()
+        self.widget.setAccessibleName("內嵌 Matplotlib 3D 出拳軌跡")
+        widget_layout = QVBoxLayout(self.widget)
+        widget_layout.setContentsMargins(0, 0, 0, 0)
+        widget_layout.setSpacing(4)
 
-        grid = gl.GLGridItem()
-        grid.setSize(2.0, 2.0)
-        grid.setSpacing(0.1, 0.1)
-        self.widget.addItem(grid)
-        self._add_axes()
+        self.figure = Figure(figsize=(7.0, 5.0), layout="constrained")
+        self.figure.set_facecolor("#f8f9fa")
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setAccessibleName("可旋轉、縮放與平移的 3D 出拳軌跡")
+        self.canvas.setMinimumHeight(300)
+        self.toolbar = NavigationToolbar2QT(self.canvas, self.widget)
+        self.toolbar.setAccessibleName("3D 軌跡操作工具列")
+        widget_layout.addWidget(self.toolbar)
+        widget_layout.addWidget(self.canvas, 1)
 
-    def _add_axes(self) -> None:
-        gl, np = self._gl, self._np
-        for endpoint, color in (
-            ((0.35, 0.0, 0.0), (0.85, 0.18, 0.22, 1.0)),
-            ((0.0, 0.35, 0.0), (0.15, 0.65, 0.30, 1.0)),
-            ((0.0, 0.0, 0.35), (0.20, 0.35, 0.85, 1.0)),
-        ):
-            item = gl.GLLinePlotItem(
-                pos=np.array(((0.0, 0.0, 0.0), endpoint), dtype=float),
-                color=color,
-                width=2,
-                antialias=True,
-            )
-            self.widget.addItem(item)
+        self.axes = self.figure.add_subplot(111, projection="3d")
+        self._positions: tuple[tuple[float, float, float], ...] = ()
 
     def show_trajectory(self, trajectory: dict) -> None:
-        for item in self._trajectory_items:
-            self.widget.removeItem(item)
-        self._trajectory_items.clear()
-        positions = self._np.array(
-            [(point["x_m"], point["y_m"], point["z_m"]) for point in trajectory["points"]],
-            dtype=float,
+        self._positions = tuple(
+            (float(point["x_m"]), float(point["y_m"]), float(point["z_m"]))
+            for point in trajectory["points"]
         )
-        color = (0.86, 0.18, 0.25, 1.0) if trajectory["hand"] == "left" else (0.15, 0.40, 0.85, 1.0)
-        line = self._gl.GLLinePlotItem(pos=positions, color=color, width=4, antialias=True)
-        endpoints = self._gl.GLScatterPlotItem(
-            pos=positions[[0, -1]],
-            color=self._np.array(((0.10, 0.65, 0.30, 1.0), (0.90, 0.25, 0.18, 1.0))),
-            size=self._np.array((9.0, 11.0)),
-            pxMode=True,
+        x_values, y_values, z_values = zip(*self._positions, strict=True)
+        color = "#d62e40" if trajectory["hand"] == "left" else "#2666cc"
+
+        self.axes.clear()
+        self.axes.plot(
+            x_values,
+            y_values,
+            z_values,
+            color=color,
+            linewidth=2.4,
+            marker="o",
+            markersize=2.5,
+            label="Trajectory",
         )
-        self.widget.addItem(line)
-        self.widget.addItem(endpoints)
-        self._trajectory_items.extend((line, endpoints))
+        self.axes.scatter(
+            *self._positions[0], color="#1aa653", s=55, depthshade=False, label="Start"
+        )
+        self.axes.scatter(
+            *self._positions[-1], color="#e63d2e", s=65, depthshade=False, label="End"
+        )
+        largest_span = max(
+            max(values) - min(values)
+            for values in zip(*self._positions, strict=True)
+        )
+        direction_length = max(0.05, largest_span * 0.35)
+        for direction, color in (
+            ((1.0, 0.0, 0.0), "#d62e40"),
+            ((0.0, 1.0, 0.0), "#1aa653"),
+            ((0.0, 0.0, 1.0), "#2666cc"),
+        ):
+            self.axes.quiver(
+                0.0,
+                0.0,
+                0.0,
+                *direction,
+                length=direction_length,
+                color=color,
+                arrow_length_ratio=0.15,
+            )
+        self.axes.set_title("3D Punch Trajectory")
+        self.axes.set_xlabel("X / right (m)")
+        self.axes.set_ylabel("Y / forward (m)")
+        self.axes.set_zlabel("Z / up (m)")
+        self.axes.grid(True)
+        self.axes.legend(loc="upper right")
+        self.axes.set_box_aspect((1.0, 1.0, 1.0))
+        self._fit_limits(1.0)
+        self.canvas.draw_idle()
+
+    def _fit_limits(self, distance: float) -> None:
+        if not self._positions:
+            return
+        axes_values = tuple(zip(*self._positions, strict=True))
+        centers = tuple((min(values) + max(values)) / 2.0 for values in axes_values)
+        largest_span = max(max(values) - min(values) for values in axes_values)
+        radius = max(0.05, largest_span * 0.60, float(distance) / 5.0)
+        self.axes.set_xlim(centers[0] - radius, centers[0] + radius)
+        self.axes.set_ylim(centers[1] - radius, centers[1] + radius)
+        self.axes.set_zlim(centers[2] - radius, centers[2] + radius)
 
     def set_camera(self, preset: str, distance: float) -> None:
-        # pyqtgraph uses azimuth -90 degrees for a camera located behind the
-        # user on -Y, looking toward the +Y punch direction.  Z stays upward.
+        # Azimuth -90 places the camera behind the user on -Y, looking toward
+        # the +Y punch direction. Z remains upward.
         cameras = {
             "user": (8.0, -90.0),
             "side": (8.0, 0.0),
             "top": (90.0, -90.0),
         }
         elevation, azimuth = cameras[preset]
-        self.widget.setCameraPosition(
-            pos=QVector3D(0.0, 0.0, 0.0),
-            distance=distance,
-            elevation=elevation,
-            azimuth=azimuth,
-        )
+        self._fit_limits(distance)
+        self.axes.view_init(elev=elevation, azim=azimuth, roll=0.0)
+        self.canvas.draw_idle()
 
 
 class TrajectoryResultView(QWidget):
-    """Selectors, summary, camera presets, and an OpenGL-safe fallback."""
+    """Selectors, summary, camera presets, and a Matplotlib-safe fallback."""
 
     def __init__(
         self,
@@ -180,11 +219,11 @@ class TrajectoryResultView(QWidget):
         layout.addWidget(self.legend)
 
         try:
-            self._canvas = (canvas_factory or PyqtgraphTrajectoryCanvas)()
+            self._canvas = (canvas_factory or MatplotlibTrajectoryCanvas)()
             layout.addWidget(self._canvas.widget, 1)
         except Exception:
             fallback = QLabel(
-                "此電腦目前無法建立互動式 3D 圖；分析結果仍已保留，"
+                "此電腦目前無法載入內嵌 Matplotlib 3D 圖；分析結果仍已保留，"
                 "你可以查看下方的軌跡摘要或重新測量。"
             )
             fallback.setObjectName("warningMessage")

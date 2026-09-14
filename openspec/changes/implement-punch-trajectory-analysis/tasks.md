@@ -58,8 +58,9 @@
 - [x] 7.3 實作滑鼠旋轉、縮放、平移，以及可用鍵盤觸發的使用者、側面、上方與重設縮放 Camera presets。
 - [x] 7.4 實作預設使用者視角：Camera 位於 user 身後朝 `+Y` 觀看，`+Z` 保持向上，並依所選軌跡自動計算可完整看見的距離。
 - [x] 7.5 顯示所選軌跡的手別、拳次、持續時間、路徑長度與最大位移，並在 Result view 保留「重新測量」。
-- [x] 7.6 實作 OpenGL／3D Widget 建立失敗的文字 Fallback，保留 Result 摘要與重新測量且不得讓 App 閃退。
+- [x] 7.6 實作 Matplotlib／3D Widget 建立失敗的文字 Fallback，保留 Result 摘要與重新測量且不得讓 App 閃退。
 - [x] 7.7 新增 UI Scenario tests，驗證 selector、Camera presets、Result 不被 Camera 操作修改、fallback、鍵盤焦點、`900 × 650` 視窗與高 DPI／捲動配置。
+- [x] 7.8 將 pyqtgraph／PyOpenGL 圖改為內嵌 Matplotlib 3D 圖，保留手別、拳次、Camera presets、摘要與重新測量，並移除不再使用的繪圖相依套件。
 
 ## 8. 完整驗證與發布準備
 

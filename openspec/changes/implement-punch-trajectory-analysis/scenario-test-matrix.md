@@ -20,7 +20,7 @@
 | desktop-app-shell | 出拳軌跡 Executor 可用 | `tests/backend/test_analysis_registry.py::test_default_production_registry_exposes_only_punch_trajectory_version_two` |
 | desktop-ui-design | user 縮小視窗 | `tests/desktop/test_desktop_ui_design.py::test_minimum_window_has_resizable_scrolling_content` |
 | desktop-ui-design | user 只使用鍵盤操作視角 | `tests/desktop/test_trajectory_view.py::test_camera_presets_are_keyboard_focusable_and_do_not_change_result` |
-| desktop-ui-design | 電腦無法建立 3D 繪圖環境 | `tests/desktop/test_trajectory_view.py::test_opengl_failure_uses_text_fallback_without_losing_summary` |
+| desktop-ui-design | 電腦無法建立 3D 繪圖環境 | `tests/desktop/test_trajectory_view.py::test_matplotlib_failure_uses_text_fallback_without_losing_summary` |
 | punch-trajectory-analysis | user 準備校正 | `tests/desktop/test_desktop_ui_design.py::test_two_stage_ready_state_explains_calibration_and_manual_next_step` |
 | punch-trajectory-analysis | 校正完成後開始正式測量 | `tests/desktop/test_desktop_ui_design.py::test_two_stage_analysis_calibrates_before_formal_measurement` |
 | punch-trajectory-analysis | 校正完成後 user 移動到正式姿勢 | `tests/backend/test_punch_trajectory.py::test_movement_between_calibration_and_measurement_is_not_calibration` |
@@ -40,4 +40,4 @@
 
 - `tests/backend/test_punch_trajectory.py::test_non_finite_sensor_value_never_returns_a_fake_trajectory` 驗證非有限 sensor 值不會產生假軌跡。
 - `tests/backend/test_analysis_sessions_api.py` 驗證完整 HTTP Session、資料庫 Result、原始 CSV checksum、失敗後重試。
-- `python -m bap_desktop.app --smoke-test` 驗證真正的 Qt/OpenGL Widget 與強制 fallback；正式 Windows Artifact 仍須再執行相同 smoke test。
+- `python -m bap_desktop.app --smoke-test` 驗證真正的 Matplotlib Qt Canvas 與強制 fallback；正式 Windows Artifact 仍須再執行相同 smoke test。
