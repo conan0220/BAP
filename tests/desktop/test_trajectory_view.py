@@ -5,7 +5,10 @@ from copy import deepcopy
 import pytest
 from PySide6.QtWidgets import QWidget
 
-from bap_desktop.ui.punch_items.trajectory_view import TrajectoryResultView
+from bap_desktop.ui.punch_items.trajectory_view import (
+    MatplotlibTrajectoryCanvas,
+    TrajectoryResultView,
+)
 
 
 def trajectory(hand: str, punch_index: int, start: int, scale: float = 1.0) -> dict:
@@ -97,15 +100,30 @@ def test_camera_presets_are_keyboard_focusable_and_do_not_change_result(qtbot) -
 
 
 @pytest.mark.scenario("desktop-ui-design", "電腦無法建立 3D 繪圖環境")
-def test_opengl_failure_uses_text_fallback_without_losing_summary(qtbot) -> None:
+def test_matplotlib_failure_uses_text_fallback_without_losing_summary(qtbot) -> None:
     def fail():
-        raise RuntimeError("forced OpenGL failure")
+        raise RuntimeError("forced Matplotlib failure")
 
     view = TrajectoryResultView(result(), canvas_factory=fail)
     qtbot.addWidget(view)
     view.show()
-    assert "無法建立互動式 3D 圖" in view.fallback_label.text()
+    assert "無法載入內嵌 Matplotlib 3D 圖" in view.fallback_label.text()
     assert "路徑長度" in view.summary.text()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "首次顯示有效軌跡 Result")
+def test_real_matplotlib_canvas_embeds_3d_trajectory(qtbot) -> None:
+    canvas = MatplotlibTrajectoryCanvas()
+    qtbot.addWidget(canvas.widget)
+    canvas.show_trajectory(trajectory("left", 1, 1_000_000))
+    canvas.set_camera("user", 0.8)
+
+    assert canvas.axes.name == "3d"
+    assert canvas.axes.get_xlabel() == "X / right (m)"
+    assert canvas.axes.get_ylabel() == "Y / forward (m)"
+    assert canvas.axes.get_zlabel() == "Z / up (m)"
+    assert len(canvas.axes.lines) == 1
+    assert round(float(canvas.axes.azim)) == -90
 
 
 @pytest.mark.scenario("punch-trajectory-analysis", "正式資料沒有偵測到出拳")

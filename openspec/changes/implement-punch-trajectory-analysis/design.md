@@ -8,7 +8,7 @@
 | Session heading | 校正時建立的 user 正前方，用來把結果轉成 X 向右、Y 向前、Z 向上的座標。 |
 | Display points | Backend 從完整估算路徑選出的有限點數，供 Desktop 3D Widget 顯示。 |
 | Production Executor | Backend 正式啟動時註冊並執行真實演算法的分析元件。 |
-| 3D adapter | 隔離 Result view 與實際 OpenGL Widget 的薄層，讓資料選擇、Camera presets 與 fallback 可以個別測試。 |
+| 3D adapter | 隔離 Result view 與內嵌 Matplotlib Widget 的薄層，讓資料選擇、Camera presets 與 fallback 可以個別測試。 |
 
 ## Context
 
@@ -25,7 +25,7 @@ BAP 已有 Common IMU CSV、左右手腕 Session、Quaternion 旋轉、靜止校
 - 以同一套可測試的 Python 運算支援左右手腕每一拳的相對三維軌跡。
 - 保留 `kaipo_research` 的姿態轉換、重力移除與兩次積分核心概念，同時移除裝置專屬硬編碼。
 - 讓 `punch_speed` 與 `punch_trajectory` 共用 CSV、時間軸、Quaternion、校正與 Punch window 邏輯，避免兩份實作逐漸不一致。
-- 讓 Desktop 以互動式 3D 圖呈現有限大小的 Result，且在 OpenGL 不可用時安全降級。
+- 讓 Desktop 以內嵌 Matplotlib 互動式 3D 圖呈現有限大小的 Result，且在繪圖環境不可用時安全降級。
 - 不改動現有 Session API 與 Database tables。
 
 **Non-Goals:**
@@ -138,9 +138,9 @@ Result validator 會從 `trajectories` 重算左右手拳數、總拳數、拳�
 
 原始高頻 CSV 已由 `imu_csv_files.csv_blob` 保存，不再把全部 400 Hz 位置點複製進 Result。每拳以固定且可重現的等距索引選點，最多保留 300 點並一定保留首尾點。
 
-### 6. Desktop 使用一個互動式 3D Widget，不產生 PNG
+### 6. Desktop 使用內嵌 Matplotlib 3D Widget，不產生暫存 PNG
 
-新增專用 Trajectory Result view，以手別與拳次 selector 決定目前軌跡。3D adapter 將 JSON points 轉成 NumPy positions，再交給 `pyqtgraph.opengl.GLViewWidget`／`GLLinePlotItem` 顯示線段、起點、終點、座標軸與參考格線。
+新增專用 Trajectory Result view，以手別與拳次 selector 決定目前軌跡。3D adapter 將 JSON points 交給 Matplotlib `FigureCanvasQTAgg` 與 `mplot3d`，直接在 BAP 結果頁面顯示線段、起點、終點、座標軸與參考格線。畫面同時保留 Matplotlib Navigation Toolbar，讓 user 操作平移、縮放、視角重設及另存圖片。
 
 Camera presets 固定定義為：
 
@@ -149,13 +149,13 @@ Camera presets 固定定義為：
 - 上方：從 `+Z` 往下看。
 - 重設縮放：保留目前 preset，重新計算能完整看到所選軌跡的距離。
 
-滑鼠可以旋轉、縮放及平移；selector 與 presets 都使用標準 Qt 控制項，因此可用鍵盤操作。Result view 不會因 Camera 改變而修改 Backend Result。
+滑鼠可以在 Matplotlib 圖上旋轉，並透過 Navigation Toolbar 縮放及平移；selector 與 presets 都使用標準 Qt 控制項，因此可用鍵盤操作。Result view 不會因 Camera 改變而修改 Backend Result。
 
-未採用 Matplotlib PNG 的原因是它不能滿足互動需求。未採用 WebEngine／Plotly 的原因是 Desktop Artifact 會明顯變大且多一層網頁執行環境。直接手寫 QOpenGL shader 的相依套件較少，但 Prototype 開發與維護成本過高。
+不採用 Matplotlib PNG，因為靜態圖不能滿足互動需求；改採 Matplotlib 的 Qt Canvas，所以仍可直接旋轉、縮放與平移。未採用 WebEngine／Plotly 的原因是 Desktop Artifact 會明顯變大且多一層網頁執行環境。未繼續使用 pyqtgraph／PyOpenGL，因為 user 希望結果與原始 `plot_trajectory.py` 的 Matplotlib 3D 視窗一致，且內嵌 Qt Canvas 已能滿足本次互動需求。
 
 ### 7. 3D 顯示失敗時使用文字 Fallback
 
-3D adapter 的建構與更新都位於錯誤邊界內。若 OpenGL context、Driver 或繪圖套件不可用，頁面改顯示：
+3D adapter 的建構與更新都位於錯誤邊界內。若 Matplotlib、Qt Canvas 或繪圖環境不可用，頁面改顯示：
 
 - 「此電腦目前無法顯示互動式 3D 軌跡」。
 - 手別、拳次、持續時間、路徑長度及最大位移。
@@ -210,10 +210,10 @@ flowchart TD
 - **[雙重積分對雜訊非常敏感]** → 每拳獨立積分、靜止校正、平滑及終點速度修正；UI 明確標示相對估算軌跡。
 - **[準備姿勢未必能穩定代表 user 正前方]** → 提供明確安裝與校正說明，檢查兩手 heading 一致性，實機驗證後再決定是否增加方向校正動作。
 - **[共用 Motion pipeline 可能改變拳頭速度結果]** → 先以既有速度測試鎖住輸出，再重構；不在本 Change 調整速度參數。
-- **[OpenGL 在部分 Windows Driver 或遠端桌面不可用]** → 提供文字 Fallback，並在 Source 與 Artifact 測試中涵蓋成功與失敗路徑。
+- **[Matplotlib Qt Canvas 在部分 Windows 環境無法載入]** → 提供文字 Fallback，並在 Source 與 Artifact 測試中涵蓋成功與失敗路徑。
 - **[Result points 太多會拖慢 API、SQLite 與 UI]** → 每拳上限 300 點，原始資料只保留在既有 CSV BLOB。
 - **[研究程式或 Fusion 原始碼授權不明]** → 不複製或發布該程式；只依可描述的運算流程與 BAP 現有 Quaternion 能力重新實作。
-- **[互動式 3D 套件增加 Desktop Artifact 大小]** → 只加入必要 Qt/OpenGL 套件，CI 比較 Artifact 大小並執行 installer smoke test。
+- **[Matplotlib 增加 Desktop Artifact 大小]** → 移除不再使用的 pyqtgraph／PyOpenGL，只保留 Matplotlib、Qt backend 與 NumPy，CI 比較 Artifact 大小並執行 installer smoke test。
 
 ## Migration Plan
 

@@ -28,9 +28,8 @@ backend = [
 ]
 desktop = [
     "keyring>=25.6,<26",
+    "matplotlib>=3.9,<4",
     "numpy>=1.26,<3",
-    "pyopengl>=3.1.7,<4",
-    "pyqtgraph>=0.13.7,<0.14",
     "pyside6>=6.9,<7",
 ]
 packaging = [
