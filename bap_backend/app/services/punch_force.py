@@ -165,6 +165,37 @@ def _interpolate_sample(before: ForceImuSample, after: ForceImuSample, packet: i
     )
 
 
+def _strict_packet_time_axis(packets: list[int], elapsed_values: list[int]) -> list[int]:
+    """Return a strict time axis while tolerating host serial-read batching.
+
+    Windows may return several physical Gateway packets in one serial read.  The
+    Desktop records those packets with the same host ``elapsed_us`` even though
+    their ``packet_index`` values are distinct and ordered.  Preserve an already
+    strict axis; otherwise spread the packets deterministically between the
+    observed first and last timestamps.  A reversed or zero-span clock remains
+    invalid because no reliable sampling interval can be recovered from it.
+    """
+    if len(packets) != len(elapsed_values) or len(packets) < 2:
+        raise ContractError("invalid_time_axis", "同步 IMU 資料的時間不足")
+    if any(second < first for first, second in zip(elapsed_values, elapsed_values[1:])):
+        raise ContractError("invalid_time_axis", "同步 IMU 資料的時間發生倒退")
+    if all(second > first for first, second in zip(elapsed_values, elapsed_values[1:])):
+        return elapsed_values
+
+    packet_span = packets[-1] - packets[0]
+    elapsed_span = elapsed_values[-1] - elapsed_values[0]
+    if packet_span <= 0 or elapsed_span < packet_span:
+        raise ContractError("invalid_time_axis", "同步 IMU 資料沒有足夠的時間跨度")
+    rebuilt = [
+        elapsed_values[0]
+        + round((packet - packets[0]) * elapsed_span / packet_span)
+        for packet in packets
+    ]
+    if any(second <= first for first, second in zip(rebuilt, rebuilt[1:])):
+        raise ContractError("invalid_time_axis", "同步 IMU 資料無法建立可靠的時間軸")
+    return rebuilt
+
+
 def align_force_inputs(inputs: dict[str, bytes], *, config: PunchForceConfig = CONFIG) -> AlignedForceFrames:
     import numpy as np
 
@@ -207,8 +238,7 @@ def align_force_inputs(inputs: dict[str, bytes], *, config: PunchForceConfig = C
                     raise ContractError("packet_alignment_failed", "兩顆 IMU 開頭或結尾缺少共同 Packet，無法可靠對齊")
                 item = _interpolate_sample(previous, following, packet, elapsed)
             aligned[role].append(item)
-    if any(second <= first for first, second in zip(elapsed_values, elapsed_values[1:])):
-        raise ContractError("invalid_time_axis", "同步 IMU 資料的時間沒有持續前進")
+    elapsed_values = _strict_packet_time_axis(packets, elapsed_values)
     duration = (elapsed_values[-1] - elapsed_values[0]) / 1_000_000.0
     sample_rate = (len(elapsed_values) - 1) / duration if duration > 0 else 0.0
     if sample_rate < config.minimum_sample_rate_hz:

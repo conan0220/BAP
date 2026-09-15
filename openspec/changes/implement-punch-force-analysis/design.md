@@ -126,6 +126,8 @@ Input Roles 固定為：
 
 正式計算以 `packet_index` 配對，不以 CSV row number 或收到資料的電腦時間硬湊。只存在其中一份 CSV 的封包視為缺口，不會把不同時間的資料誤認為同一筆量測。
 
+Windows 可能在一次 Serial read 收到多個 Gateway Packets，使不同 `packet_index` 共用相同的 host `elapsed_us`。只要時間沒有倒退且首尾具有有效時間跨度，Backend 會用 `packet_index`、首筆時間與末筆時間建立 deterministic、嚴格遞增的分析時間軸；原始 CSV 保持不變。若時間倒退、完全沒有跨度或無法建立可靠時間軸，Backend 仍拒絕分析。
+
 ### 3. 對少量內部缺口插值，但不改寫原始 CSV
 
 對齊後如果只有少量、位於資料中間的封包缺口，Backend 可以在計算用的記憶體資料中做線性插值，並加入 Quality Warning。以下情況直接讓 Analysis Job 失敗：

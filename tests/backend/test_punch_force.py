@@ -156,6 +156,32 @@ def test_packet_alignment_and_display_limit_preserve_source_bytes() -> None:
     assert inputs == before
 
 
+@pytest.mark.scenario("punch-force-analysis", "Serial 批次接收使相鄰 Packet 共用 elapsed_us")
+def test_serial_batch_duplicate_elapsed_is_reconstructed_from_packet_index() -> None:
+    inputs = synthetic_pair()
+
+    def batch_timestamp(_index: int, row: dict[str, str]) -> None:
+        elapsed = int(row["elapsed_us"])
+        row["elapsed_us"] = str((elapsed // 5_000) * 5_000)
+
+    inputs = {role: rewrite_csv(data, batch_timestamp) for role, data in inputs.items()}
+    frames = align_force_inputs(inputs)
+    assert all(second > first for first, second in zip(frames.elapsed_us, frames.elapsed_us[1:]))
+    assert frames.sample_rate_hz == pytest.approx(400.0)
+    assert execute(inputs)["peak_force_kgf"] > 0
+
+
+def test_elapsed_without_any_time_span_is_rejected() -> None:
+    inputs = synthetic_pair()
+    inputs = {
+        role: rewrite_csv(data, lambda _index, row: row.update(elapsed_us="1"))
+        for role, data in inputs.items()
+    }
+    with pytest.raises(ContractError) as captured:
+        align_force_inputs(inputs)
+    assert captured.value.code == "invalid_time_axis"
+
+
 @pytest.mark.scenario("punch-force-analysis", "少量無線 Packet 遺漏")
 def test_small_internal_packet_gap_is_interpolated_and_warned() -> None:
     inputs = synthetic_pair(missing_top={1000, 1001})

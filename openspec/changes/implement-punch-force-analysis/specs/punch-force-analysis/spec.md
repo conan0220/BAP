@@ -71,6 +71,12 @@ Backend MUST 以兩份 Common IMU CSV 的 `packet_index` 對齊同一個無線�
 - **THEN** Backend 只使用能可靠配對或依規則插值的 Packet 執行計算
 - **AND** 不以兩份 CSV 的列號直接假設資料已對齊
 
+#### Scenario: Serial 批次接收使相鄰 Packet 共用 elapsed_us
+- **WHEN** 不同 `packet_index` 的相鄰 Gateway Packets 因同一次 Serial read 而具有相同但未倒退的 `elapsed_us`
+- **THEN** Backend 以 `packet_index`、首筆時間與末筆時間建立可重現且持續前進的分析時間軸
+- **AND** Backend 不因批次接收造成的相同時間戳直接拒絕分析
+- **AND** 原始 Common IMU CSV 不被改寫
+
 #### Scenario: 少量無線 Packet 遺漏
 - **WHEN** 少量且符合版本化限制的 Packet 只出現在其中一份 CSV
 - **THEN** Backend 以確定且可重現的方法補齊分析用資料
