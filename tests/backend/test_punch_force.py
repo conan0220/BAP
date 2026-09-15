@@ -137,11 +137,12 @@ def test_no_strike_is_rejected_without_fake_force() -> None:
     assert captured.value.code == "no_valid_strike"
 
 
-@pytest.mark.scenario("punch-force-analysis", "正式資料包含多次打擊")
-def test_multiple_strikes_are_rejected() -> None:
-    with pytest.raises(ContractError) as captured:
-        execute(synthetic_pair(strikes=(2.8, 3.4)))
-    assert captured.value.code == "multiple_strikes"
+@pytest.mark.scenario("punch-force-analysis", "正式資料包含多個局部峰值")
+def test_multiple_local_peaks_use_the_global_maximum() -> None:
+    result = execute(synthetic_pair(strikes=(2.8, 3.4)))
+    assert result["peak_force_kgf"] > 0
+    assert result["peak_elapsed_us"] == pytest.approx(2_800_000, abs=5_000)
+    assert result["algorithm_version"] == "bag_rigid_body_global_max_v1"
 
 
 @pytest.mark.scenario("punch-force-analysis", "上下方 CSV 具有共同 Packet")

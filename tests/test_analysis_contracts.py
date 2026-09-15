@@ -330,7 +330,7 @@ def punch_force_specification() -> AnalysisSpecification:
 
 def valid_punch_force_result() -> dict:
     return {
-        "algorithm_version": "bag_rigid_body_v1",
+        "algorithm_version": "bag_rigid_body_global_max_v1",
         "peak_elapsed_us": 3_000_000,
         "peak_force_n": 98.0665,
         "peak_force_kgf": 10.0,

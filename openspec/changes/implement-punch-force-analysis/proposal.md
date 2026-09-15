@@ -24,7 +24,7 @@
 - 新增 `punch_force` version 1 Analysis Specification 與 Production Executor，將兩份 Common IMU CSV 對齊、驗證、濾波，再計算最大打擊力及打擊位置。
 - Backend Result 同時提供 N 與 kgf、峰值時間、峰值質心加速度、打擊高度、實際取樣率、品質狀態、警告與有限點數的顯示曲線。
 - Desktop App 以摘要卡、打擊位置、品質文字及內嵌 Matplotlib 曲線顯示結果，並保留重新測量操作。
-- 加入沒有有效打擊、多次打擊、來源不一致、資料遺漏、取樣率不足、Quaternion 無效、感測器安裝異常與非有限運算等安全失敗或警告規則。
+- 正式測量區間直接選擇力量曲線的 global maximum；多個局部峰值不視為多次打擊錯誤。另加入沒有可用正力量、來源不一致、資料遺漏、取樣率不足、Quaternion 無效、感測器安裝異常與非有限運算等安全失敗或警告規則。
 - 以合成資料、API Integration、Desktop Scenario、完整回歸與 Windows Artifact 測試驗證整條流程；實機測試只驗證流程與相對趨勢，不在沒有 Ground Truth 的情況下宣稱絕對力量準確度。
 - 原始 `punch_force/` 只作為研究參考，不直接複製 CLI、副作用式檔案輸出、批次模式或研究資料到正式 Artifact。
 

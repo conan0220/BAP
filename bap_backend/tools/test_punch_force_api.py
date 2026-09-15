@@ -194,7 +194,6 @@ def main(argv: list[str] | None = None) -> int:
     base = args.api_base_url.rstrip("/") + "/"
     expected_failures = {
         "no_strike": "no_valid_strike",
-        "multiple_strikes": "multiple_strikes",
         "packet_gap": "packet_alignment_failed",
         "different_group": "different_gateway",
     }
@@ -215,10 +214,14 @@ def main(argv: list[str] | None = None) -> int:
         if valid["status"] != "completed":
             raise RuntimeError(f"valid punch-force case failed: {valid}")
         result = valid["result"]
-        if result["algorithm_version"] != "bag_rigid_body_v1" or result["peak_force_kgf"] <= 0:
+        if result["algorithm_version"] != "bag_rigid_body_global_max_v1" or result["peak_force_kgf"] <= 0:
             raise RuntimeError("valid punch-force result was incomplete")
         if len(result["curve_points"]) > 300:
             raise RuntimeError("punch-force curve exceeded display limit")
+
+        multiple = _run_case(client, headers, "multiple_strikes")
+        if multiple["status"] != "completed" or multiple["result"]["peak_force_kgf"] <= 0:
+            raise RuntimeError(f"multiple-peak global maximum case failed: {multiple}")
 
         batched = _run_case(client, headers, "batched_timestamps")
         if batched["status"] != "completed" or batched["result"]["peak_force_kgf"] <= 0:
@@ -238,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "status": "passed",
             "algorithm_version": result["algorithm_version"],
-            "cases": ["valid", "batched_timestamps", "warning", *expected_failures],
+            "cases": ["valid", "multiple_strikes", "batched_timestamps", "warning", *expected_failures],
         }))
     return 0
 

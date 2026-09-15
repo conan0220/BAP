@@ -91,7 +91,7 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
                 return {
                     "status": "completed",
                     "result": {
-                        "algorithm_version": "bag_rigid_body_v1",
+                        "algorithm_version": "bag_rigid_body_global_max_v1",
                         "peak_force_kgf": 10.0,
                         "peak_force_n": 98.0665,
                         "curve_points": [],
