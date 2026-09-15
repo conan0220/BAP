@@ -173,6 +173,37 @@ class AnalysisSpecification(BaseModel):
                 raise ContractError(
                     "invalid_parameter", "校正結束時間不得晚於正式測量開始時間"
                 )
+        if self.analysis_type == "punch_force" and self.spec_version == 1:
+            required = (
+                "calibration_end_elapsed_us", "measurement_start_elapsed_us",
+                "bag_mass_kg", "bag_length_m", "bag_diameter_m", "sensor_distance_m",
+            )
+            missing = [name for name in required if name not in parameters]
+            if missing:
+                raise ContractError("missing_parameter", f"缺少出拳力量參數：{', '.join(missing)}")
+            calibration_end = parameters["calibration_end_elapsed_us"]
+            measurement_start = parameters["measurement_start_elapsed_us"]
+            if any(
+                isinstance(boundary, bool) or not isinstance(boundary, int) or boundary <= 0
+                for boundary in (calibration_end, measurement_start)
+            ):
+                raise ContractError("invalid_parameter", "錄製時間邊界必須是大於零的整數 microseconds")
+            if calibration_end > measurement_start:
+                raise ContractError("invalid_parameter", "校正結束時間不得晚於正式測量開始時間")
+            physical = {
+                name: parameters[name]
+                for name in ("bag_mass_kg", "bag_length_m", "bag_diameter_m", "sensor_distance_m")
+            }
+            for name, value in physical.items():
+                if (
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value)) or float(value) <= 0
+                ):
+                    raise ContractError(
+                        "invalid_parameter", f"出拳力量參數 {name} 必須是大於零的有限數值"
+                    )
+            if float(physical["sensor_distance_m"]) > float(physical["bag_length_m"]):
+                raise ContractError("invalid_parameter", "上下 IMU 間距不得大於沙袋長度")
 
     def validate_result(self, result: dict[str, Any]) -> None:
         fields = {field.name: field for field in self.result_fields}
@@ -198,6 +229,71 @@ class AnalysisSpecification(BaseModel):
             _validate_punch_classification_result(result)
         if self.analysis_type == "punch_trajectory" and self.spec_version == 2:
             _validate_punch_trajectory_result(result)
+        if self.analysis_type == "punch_force" and self.spec_version == 1:
+            _validate_punch_force_result(result)
+
+
+def _validate_punch_force_result(result: dict[str, Any]) -> None:
+    if not result["algorithm_version"].strip():
+        raise ContractError("invalid_result_value", "出拳力量缺少演算法版本")
+    numeric_fields = (
+        "peak_force_n", "peak_force_kgf", "peak_com_acceleration_g",
+        "impact_height_from_bottom_m", "impact_offset_from_center_m", "sample_rate_hz",
+    )
+    for name in numeric_fields:
+        value = result[name]
+        if isinstance(value, bool) or not math.isfinite(float(value)):
+            raise ContractError("invalid_result_value", f"出拳力量欄位 {name} 必須是有限數值")
+    if result["peak_force_n"] <= 0 or result["peak_force_kgf"] <= 0:
+        raise ContractError("invalid_result_value", "出拳力量必須大於零")
+    if result["peak_com_acceleration_g"] < 0 or result["sample_rate_hz"] <= 0:
+        raise ContractError("invalid_result_value", "加速度與取樣率必須是合理數值")
+    if not math.isclose(
+        float(result["peak_force_n"]) / 9.80665, float(result["peak_force_kgf"]),
+        rel_tol=1e-5, abs_tol=1e-3,
+    ):
+        raise ContractError("invalid_result_value", "Newton 與 kgf 換算不一致")
+    peak_elapsed = result["peak_elapsed_us"]
+    if isinstance(peak_elapsed, bool) or not isinstance(peak_elapsed, int) or peak_elapsed < 0:
+        raise ContractError("invalid_result_value", "力量峰值時間必須是非負整數")
+    warnings = result["warnings"]
+    if any(not isinstance(item, str) or not item.strip() for item in warnings):
+        raise ContractError("invalid_result_value", "資料品質警告必須是非空白文字")
+    quality = result["quality_status"]
+    if quality not in {"valid", "warning"}:
+        raise ContractError("invalid_result_value", "資料品質狀態不正確")
+    if (quality == "valid" and warnings) or (quality == "warning" and not warnings):
+        raise ContractError("invalid_result_value", "資料品質狀態與 warnings 不一致")
+
+    points = result["curve_points"]
+    if not 2 <= len(points) <= 300:
+        raise ContractError("invalid_result_value", "力量顯示曲線必須包含 2 至 300 個點")
+    expected_keys = {
+        "elapsed_us", "top_horizontal_acceleration_mps2",
+        "bottom_horizontal_acceleration_mps2", "angular_acceleration_x_radps2",
+        "angular_acceleration_y_radps2", "force_kgf",
+    }
+    previous_elapsed = -1
+    includes_peak = False
+    for point in points:
+        if not isinstance(point, dict) or set(point) != expected_keys:
+            raise ContractError("invalid_result_value", "力量顯示曲線欄位不正確")
+        elapsed = point["elapsed_us"]
+        if isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < previous_elapsed:
+            raise ContractError("invalid_result_value", "力量顯示曲線時間順序不正確")
+        includes_peak = includes_peak or elapsed == peak_elapsed
+        previous_elapsed = elapsed
+        for name in expected_keys - {"elapsed_us"}:
+            value = point[name]
+            if (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                raise ContractError("invalid_result_value", "力量顯示曲線包含非有限數值")
+        if point["force_kgf"] < 0:
+            raise ContractError("invalid_result_value", "力量曲線不得小於零")
+    if not includes_peak:
+        raise ContractError("invalid_result_value", "力量顯示曲線必須保留峰值點")
 
 
 PUNCH_CLASSIFICATION_TYPES = (
@@ -499,6 +595,32 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
                 ResultFieldSpecification(name="right_punch_count", value_type=ResultValueType.INTEGER),
                 ResultFieldSpecification(name="total_punch_count", value_type=ResultValueType.INTEGER),
                 ResultFieldSpecification(name="trajectories", value_type=ResultValueType.ARRAY),
+            ),
+        ),
+        AnalysisSpecification(
+            analysis_type="punch_force",
+            spec_version=1,
+            display_name="出拳力量",
+            input_roles=(
+                InputRoleSpecification(name="bag_top", display_name="沙袋上方"),
+                InputRoleSpecification(name="bag_bottom", display_name="沙袋下方"),
+            ),
+            parameter_names=(
+                "calibration_end_elapsed_us", "measurement_start_elapsed_us",
+                "bag_mass_kg", "bag_length_m", "bag_diameter_m", "sensor_distance_m",
+            ),
+            result_fields=(
+                ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="peak_elapsed_us", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="peak_force_n", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="peak_force_kgf", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="peak_com_acceleration_g", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="impact_height_from_bottom_m", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="impact_offset_from_center_m", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="sample_rate_hz", value_type=ResultValueType.NUMBER),
+                ResultFieldSpecification(name="quality_status", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="warnings", value_type=ResultValueType.ARRAY),
+                ResultFieldSpecification(name="curve_points", value_type=ResultValueType.ARRAY),
             ),
         ),
         AnalysisSpecification(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from threading import Event
+import math
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
@@ -32,6 +33,7 @@ from bap_common.analysis_session import SessionStopReason
 from bap_desktop.ui.components import Card, PageHeader
 from bap_desktop.ui.punch_items.definitions import ImuPlacement, get_punch_item_definition
 from bap_desktop.ui.punch_items.trajectory_view import TrajectoryResultView
+from bap_desktop.ui.punch_items.force_view import ForceResultView
 
 
 class _DiscoverySignals(QObject):
@@ -88,7 +90,7 @@ class PunchItemPage(QWidget):
         self.item_name = item_name
         self.definition = get_punch_item_definition(item_name)
         self._is_available_item = self.definition.analysis_type in {
-            "punch_count", "punch_speed", "punch_trajectory", "punch_classification"
+            "punch_count", "punch_speed", "punch_force", "punch_trajectory", "punch_classification"
         }
         self.service = service or ImuDiscoveryService()
         self.analysis_flow = analysis_flow
@@ -143,6 +145,29 @@ class PunchItemPage(QWidget):
         self.sources_layout = QVBoxLayout(self.sources_container)
         self.sources_layout.setContentsMargins(0, 0, 0, 0)
         self.sources_layout.setSpacing(10)
+        self.force_settings = QWidget()
+        force_layout = QGridLayout(self.force_settings)
+        force_layout.setContentsMargins(0, 0, 0, 0)
+        force_layout.addWidget(QLabel("請確認本次使用的沙袋參數；所有長度單位都是公尺。"), 0, 0, 1, 3)
+        self.force_parameter_inputs: dict[str, QLineEdit] = {}
+        for row, (name, label, default, unit) in enumerate(
+            (
+                ("bag_mass_kg", "沙袋質量", "36", "kg"),
+                ("bag_length_m", "沙袋長度", "1.24", "m"),
+                ("bag_diameter_m", "沙袋直徑", "0.335", "m"),
+                ("sensor_distance_m", "上下 IMU 間距", "1.24", "m"),
+            ),
+            start=1,
+        ):
+            field = QLineEdit(default)
+            field.setAccessibleName(f"{label}（{unit}）")
+            field.setPlaceholderText("大於 0")
+            force_layout.addWidget(QLabel(label), row, 0)
+            force_layout.addWidget(field, row, 1)
+            force_layout.addWidget(QLabel(unit), row, 2)
+            self.force_parameter_inputs[name] = field
+        force_layout.setColumnStretch(1, 1)
+        self.force_settings.setVisible(False)
         self.duration_row = QWidget()
         duration_layout = QHBoxLayout(self.duration_row)
         duration_layout.setContentsMargins(0, 0, 0, 0)
@@ -175,6 +200,7 @@ class PunchItemPage(QWidget):
             self.message,
             self.installation_confirmation,
             self.sources_container,
+            self.force_settings,
             self.duration_row,
             self.timer_details,
         ):
@@ -218,6 +244,7 @@ class PunchItemPage(QWidget):
         self.analysis_chip.setText("可使用" if self._is_available_item else "分析功能待開發")
         self.duration_input.setEnabled(True)
         self.duration_row.setVisible(False)
+        self.force_settings.setVisible(False)
         self.timer_details.clear()
         self.timer_details.setVisible(False)
         self._latest_sources = ()
@@ -273,6 +300,11 @@ class PunchItemPage(QWidget):
                 "Node1 是持靶人左手拳靶；Node2 是持靶人右手拳靶。"
             )
             self.installation_confirmation.setVisible(True)
+        elif self.definition.analysis_type == "punch_force":
+            self.status.setText(
+                "請從同一個無線接收器與 Group 選擇兩顆不同 IMU，"
+                "並分別指定為沙袋上方與沙袋下方。"
+            )
         for placement in self.definition.placements:
             self._add_assignment_row(placement, sources)
         selectors = list(self._source_selectors)
@@ -286,7 +318,7 @@ class PunchItemPage(QWidget):
         self._validate_assignments()
 
     def _eligible_sources(self, sources: tuple[ImuSource, ...]) -> tuple[ImuSource, ...]:
-        if self.definition.analysis_type != "punch_classification":
+        if self.definition.analysis_type not in {"punch_classification", "punch_force"}:
             return sources
         wireless = tuple(
             source for source in sources
@@ -363,7 +395,7 @@ class PunchItemPage(QWidget):
         complete = len(self.assignments) == len(self.definition.placements) > 0
         unique = len(set(selected)) == len(selected)
         same_gateway = True
-        if self.definition.analysis_type == "punch_classification" and len(selected) == 2:
+        if self.definition.analysis_type in {"punch_classification", "punch_force"} and len(selected) == 2:
             left, right = selected
             same_gateway = (
                 left.connection_type is ConnectionType.WIRELESS_RECEIVER
@@ -381,7 +413,8 @@ class PunchItemPage(QWidget):
             self.message.setText(text.DISCOVERY_DUPLICATE)
             self.message.setVisible(True)
         elif not same_gateway:
-            self.message.setText("左右拳靶必須選擇同一個無線接收器與 Group 下的不同 Node。")
+            subject = "沙袋上、下方 IMU" if self.definition.analysis_type == "punch_force" else "左右拳靶"
+            self.message.setText(f"{subject}必須選擇同一個無線接收器與 Group 下的不同 Node。")
             self.message.setVisible(True)
         elif complete and not confirmed:
             self.message.setText("請先確認兩顆 IMU 的安裝位置、方向與左右定義。")
@@ -459,19 +492,25 @@ class PunchItemPage(QWidget):
                 "再按「開始校正」。"
                 "系統會校正兩秒；校正完成後，再由你按按鈕開始正式錄製。"
             )
+        elif self.definition.analysis_type == "punch_force":
+            self.force_settings.setVisible(True)
+            self.status.setText(
+                "請確認沙袋參數。下一步請讓沙袋完全靜止、不要碰撞，"
+                "並確認上下兩顆 IMU 已固定，再按「開始校正」。"
+            )
         else:
             self.status.setText("IMU 已準備完成，按下「開始測量」後才會建立正式 CSV。")
         self.analysis_chip.setText("準備測量")
         self._measurement_state = "ready"
         self.continue_button.setText(
             "開始校正"
-            if self.definition.analysis_type in {"punch_speed", "punch_trajectory"}
+            if self.definition.analysis_type in {"punch_speed", "punch_trajectory", "punch_force"}
             else "開始測量"
         )
         self.continue_button.setEnabled(True)
         self.retry_button.setVisible(False)
         self.duration_row.setVisible(
-            self.definition.analysis_type not in {"punch_speed", "punch_trajectory"}
+            self.definition.analysis_type not in {"punch_speed", "punch_trajectory", "punch_force"}
         )
         self.timer_details.setVisible(False)
         self.service.clear()
@@ -479,6 +518,7 @@ class PunchItemPage(QWidget):
     def _show_unavailable(self) -> None:
         self._clear_source_selectors()
         self.message.setVisible(False)
+        self.force_settings.setVisible(False)
         if self._is_available_item:
             self.status.setText(
                 f"Backend 目前沒有提供{self.item_name}分析，"
@@ -496,7 +536,7 @@ class PunchItemPage(QWidget):
         if self.recording_root is None:
             self._show_error("本機 Session 暫存位置尚未設定")
             return
-        if self.definition.analysis_type in {"punch_speed", "punch_trajectory"}:
+        if self.definition.analysis_type in {"punch_speed", "punch_trajectory", "punch_force"}:
             # 校正尚未完成時不要求 user 決定正式錄製時間。這個值只用來建立
             # 暫存錄製物件，正式時間會在 user 按下「開始正式錄製」時覆寫。
             requested_duration = 60
@@ -506,6 +546,13 @@ class PunchItemPage(QWidget):
             except ValueError:
                 self._show_invalid_duration()
                 return
+        analysis_parameters = {}
+        if self.definition.analysis_type == "punch_force":
+            try:
+                analysis_parameters = self._force_parameters()
+            except ValueError as error:
+                self.status.setText(str(error))
+                return
         try:
             self._recording = self.recording_factory(
                 self.recording_root,
@@ -514,6 +561,7 @@ class PunchItemPage(QWidget):
                 spec_version=self.definition.spec_version,
                 desktop_version=self.desktop_version,
                 requested_duration_seconds=requested_duration,
+                analysis_parameters=analysis_parameters,
             )
             self._recording.start()
         except Exception:
@@ -522,11 +570,13 @@ class PunchItemPage(QWidget):
         calibrating = bool(getattr(self._recording, "is_calibrating", False))
         self._measurement_state = "calibrating" if calibrating else "recording"
         self._elapsed_seconds = 0
-        self.status.setText(
-            "校正 IMU 中，請將雙手自然放下並保持不動。"
-            if calibrating
-            else "測量中"
-        )
+        if calibrating and self.definition.analysis_type == "punch_force":
+            self.status.setText("校正 IMU 中，請讓沙袋完全靜止且不要碰觸沙袋。")
+        else:
+            self.status.setText(
+                "校正 IMU 中，請將雙手自然放下並保持不動。"
+                if calibrating else "測量中"
+            )
         self.duration_input.setEnabled(False)
         self.timer_details.setVisible(True)
         self._update_elapsed()
@@ -568,7 +618,10 @@ class PunchItemPage(QWidget):
                     return
                 self._measurement_state = "calibration_ready"
                 self.status.setText(
-                    "校正完成。請輸入正式錄製時間，再按「開始正式錄製」。"
+                    "校正完成。請輸入正式錄製時間；正式錄製期間只能擊打沙袋一次，"
+                    "再按「開始正式錄製」。"
+                    if self.definition.analysis_type == "punch_force"
+                    else "校正完成。請輸入正式錄製時間，再按「開始正式錄製」。"
                 )
                 self.timer_details.setText("校正完成｜正式錄製尚未開始")
                 self.duration_input.setEnabled(True)
@@ -621,6 +674,29 @@ class PunchItemPage(QWidget):
         self.timer_details.setText("已錄製 00:00｜剩餘 00:00")
         self.continue_button.setText("提前結束測量")
         self.continue_button.setEnabled(True)
+
+    def _force_parameters(self) -> dict[str, float]:
+        values: dict[str, float] = {}
+        labels = {
+            "bag_mass_kg": "沙袋質量",
+            "bag_length_m": "沙袋長度",
+            "bag_diameter_m": "沙袋直徑",
+            "sensor_distance_m": "上下 IMU 間距",
+        }
+        for name, field in self.force_parameter_inputs.items():
+            try:
+                value = float(field.text().strip())
+            except ValueError as error:
+                field.setFocus()
+                raise ValueError(f"{labels[name]}必須是數字。") from error
+            if not math.isfinite(value) or value <= 0:
+                field.setFocus()
+                raise ValueError(f"{labels[name]}必須是大於零的有限數值。")
+            values[name] = value
+        if values["sensor_distance_m"] > values["bag_length_m"]:
+            self.force_parameter_inputs["sensor_distance_m"].setFocus()
+            raise ValueError("上下 IMU 間距不得大於沙袋長度。")
+        return values
 
     def _requested_duration(self) -> int:
         raw_duration = self.duration_input.text().strip()
@@ -753,6 +829,10 @@ class PunchItemPage(QWidget):
         self._show_analysis_result(validated.result)
 
     def _show_analysis_result(self, result: dict) -> None:
+        if self.definition.analysis_type == "punch_force":
+            self.force_result_view = ForceResultView(result)
+            self.sources_layout.addWidget(self.force_result_view)
+            return
         if self.definition.analysis_type == "punch_trajectory":
             self.trajectory_result_view = TrajectoryResultView(result)
             self.sources_layout.addWidget(self.trajectory_result_view)

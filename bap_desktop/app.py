@@ -153,6 +153,7 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
     report = report_progress or (lambda _stage: None)
 
     import io
+    import math
     import tempfile
     from datetime import datetime, timezone
     from uuid import uuid4
@@ -216,10 +217,18 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
         if item.specification.analysis_type == "punch_speed"
         and item.specification.spec_version == 2
     )
+    punch_force = next(
+        item
+        for item in capabilities
+        if item.specification.analysis_type == "punch_force"
+        and item.specification.spec_version == 1
+    )
     if not punch_count.executable:
         raise RuntimeError("Production punch-count Executor is not available")
     if not punch_speed.executable:
         raise RuntimeError("Production punch-speed Executor version 2 is not available")
+    if not punch_force.executable:
+        raise RuntimeError("Production punch-force Executor version 1 is not available")
 
     def punch_csv(peak_index: int) -> bytes:
         output = io.StringIO(newline="")
@@ -279,6 +288,71 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
                 "measurement_start_elapsed_us": 2_000_000,
             },
         )
+
+        def force_csv(role: str) -> bytes:
+            output = io.StringIO(newline="")
+            writer = write_header(output)
+            bag_mass = 36.0
+            bag_length = 1.24
+            bag_radius = 0.335 / 2.0
+            inertia = bag_mass * (3.0 * bag_radius**2 + bag_length**2) / 12.0
+            for index in range(1681):
+                seconds = index / 400.0
+                distance = abs(seconds - 3.0)
+                pulse = math.cos(distance / 0.04 * math.pi / 2.0) if distance <= 0.04 else 0.0
+                center_acceleration = 50.0 / bag_mass * 9.80665 * pulse
+                angular_acceleration = 0.2 * (50.0 * 9.80665) / inertia * pulse
+                difference = angular_acceleration * bag_length
+                horizontal = center_acceleration + (
+                    difference / 2.0 if role == "bag_top" else -difference / 2.0
+                )
+                frame = AnrotFrame()
+                frame.frame_type = 0x91
+                frame.system_time_ms = round(seconds * 1000)
+                frame.acc = (horizontal / 9.80665, 0.0, 1.0)
+                frame.gyr = (0.0, 90.0 * pulse, 0.0)
+                frame.mag = (0.0, 0.0, 0.0)
+                frame.quat = (1.0, 0.0, 0.0, 0.0)
+                frame.roll = frame.pitch = frame.yaw = 0.0
+                writer.writerow(frame_csv_row(
+                    frame,
+                    sample_index=index,
+                    packet_index=index,
+                    elapsed_us=round(seconds * 1_000_000),
+                ))
+            return output.getvalue().encode("utf-8")
+
+        force_descriptors = []
+        for node_id, role in enumerate(("bag_top", "bag_bottom")):
+            filename = f"{role}.csv"
+            data = force_csv(role)
+            (root / filename).write_bytes(data)
+            inspected = inspect_common_imu_csv_bytes(data)
+            force_descriptors.append(CsvDescriptor(
+                csv_id=uuid4(), filename=filename,
+                source=ImuSourceDescriptor(
+                    source_id=f"CI:group-0:node-{node_id}", port="CI",
+                    connection_type=SourceConnectionType.WIRELESS_RECEIVER,
+                    baud_rate=921600, group_id=0, node_id=node_id,
+                ),
+                row_count=inspected.row_count, size_bytes=inspected.size_bytes,
+                sha256=inspected.sha256,
+            ))
+        force_job = AnalysisJobRequest(
+            analysis_id=uuid4(), analysis_type="punch_force", spec_version=1,
+            input_bindings=(
+                AnalysisInputBinding(input_role="bag_top", csv_id=force_descriptors[0].csv_id),
+                AnalysisInputBinding(input_role="bag_bottom", csv_id=force_descriptors[1].csv_id),
+            ),
+            parameters={
+                "calibration_end_elapsed_us": 2_000_000,
+                "measurement_start_elapsed_us": 2_200_000,
+                "bag_mass_kg": 36.0,
+                "bag_length_m": 1.24,
+                "bag_diameter_m": 0.335,
+                "sensor_distance_m": 1.24,
+            },
+        )
         now = datetime.now(timezone.utc)
         metadata = SessionMetadata(
             session_id=uuid4(), metadata_schema_version=2,
@@ -286,7 +360,8 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
             requested_duration_seconds=5,
             actual_duration_seconds=3.0,
             stop_reason=SessionStopReason.ENDED_BY_USER,
-            csv_files=tuple(descriptors), analyses=(count_job, speed_job),
+            csv_files=tuple((*descriptors, *force_descriptors)),
+            analyses=(count_job, speed_job, force_job),
         )
         report("upload_session")
         accepted = analysis.upload(root, metadata, tokens.access_token)
@@ -310,6 +385,24 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
             raise RuntimeError("installed Desktop punch-speed E2E returned an unexpected count")
         if not float(speed_payload.get("left_max_speed_mps", 0)) > 0:
             raise RuntimeError("installed Desktop punch-speed E2E returned no positive speed")
+        force_result = _wait_for_api_e2e_analysis(
+            analysis,
+            accepted["session_id"],
+            str(force_job.analysis_id),
+            tokens.access_token,
+        )
+        force_payload = force_result.get("result", {})
+        if force_payload.get("algorithm_version") != "bag_rigid_body_v1":
+            raise RuntimeError("installed Desktop punch-force E2E returned an unexpected algorithm version")
+        if not float(force_payload.get("peak_force_kgf", 0)) > 0:
+            raise RuntimeError("installed Desktop punch-force E2E returned no positive force")
+        if abs(
+            float(force_payload.get("peak_force_n", 0))
+            - float(force_payload["peak_force_kgf"]) * 9.80665
+        ) > 0.02:
+            raise RuntimeError("installed Desktop punch-force E2E returned inconsistent units")
+        if len(force_payload.get("curve_points", ())) > 300:
+            raise RuntimeError("installed Desktop punch-force E2E exceeded the curve display limit")
     report("refresh_token")
     refreshed = auth.refresh(tokens.refresh_token)
     report("logout")

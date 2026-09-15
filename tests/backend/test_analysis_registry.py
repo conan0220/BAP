@@ -62,3 +62,15 @@ def test_default_production_registry_exposes_only_punch_trajectory_version_two()
     }
     assert capabilities[("punch_trajectory", 1)] is False
     assert capabilities[("punch_trajectory", 2)] is True
+
+
+@pytest.mark.scenario("desktop-app-shell", "出拳力量 version 1 可執行")
+@pytest.mark.scenario("desktop-app-shell", "出拳力量 Executor 可用")
+def test_default_production_registry_exposes_punch_force_version_one():
+    registry = create_default_analysis_registry()
+    assert registry.executor("punch_force", 1) is not None
+    capability = next(
+        item for item in registry.capabilities()
+        if item["analysis_type"] == "punch_force" and item["spec_version"] == 1
+    )
+    assert capability["executable"] is True
