@@ -64,12 +64,12 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
                 AnalysisCapability(specification, True)
                 for specification in builtin_analysis_specifications()
                 if (specification.analysis_type, specification.spec_version)
-                in {("punch_count", 1), ("punch_speed", 2)}
+                in {("punch_count", 1), ("punch_speed", 2), ("punch_force", 1)}
             )
 
         def upload(self, directory, metadata, access_token: str):
             assert access_token == "access"
-            assert len(metadata.csv_files) == 2
+            assert len(metadata.csv_files) == 4
             self.analysis_types = {
                 str(item.analysis_id): item.analysis_type for item in metadata.analyses
             }
@@ -85,6 +85,16 @@ def test_packaged_api_e2e_handles_expected_http_rejections(monkeypatch) -> None:
                     "result": {
                         "total_punch_count": 2,
                         "left_max_speed_mps": 4.2,
+                    },
+                }
+            if self.analysis_types[analysis_id] == "punch_force":
+                return {
+                    "status": "completed",
+                    "result": {
+                        "algorithm_version": "bag_rigid_body_v1",
+                        "peak_force_kgf": 10.0,
+                        "peak_force_n": 98.0665,
+                        "curve_points": [],
                     },
                 }
             return {
@@ -242,10 +252,11 @@ def test_successful_restore_opens_authenticated_home(qtbot) -> None:
     assert "可使用" in window.home_page.punch_buttons["拳頭速度"].text()
     assert "可使用" in window.home_page.punch_buttons["拳種辨識"].text()
     assert "可使用" in window.home_page.punch_buttons["出拳軌跡"].text()
+    assert "可使用" in window.home_page.punch_buttons["出拳力量"].text()
     assert all(
         text.PENDING in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name not in {"出拳次數", "拳頭速度", "出拳軌跡", "拳種辨識"}
+        if name not in {"出拳次數", "拳頭速度", "出拳力量", "出拳軌跡", "拳種辨識"}
     )
 
 

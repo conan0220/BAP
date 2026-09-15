@@ -119,7 +119,7 @@ def test_keyboard_can_activate_navigation_and_focus_is_visually_defined(qtbot) -
 
 @pytest.mark.scenario("desktop-ui-design", "顯示待開發項目")
 @pytest.mark.scenario("desktop-app-shell", "查看拳擊測量項目")
-def test_home_has_four_available_items_and_one_pending_item(qtbot) -> None:
+def test_home_has_five_available_items(qtbot) -> None:
     window = MainWindow(SessionStub())  # type: ignore[arg-type]
     qtbot.addWidget(window)
 
@@ -137,7 +137,7 @@ def test_home_has_four_available_items_and_one_pending_item(qtbot) -> None:
     assert all(
         "待開發" in button.text()
         for name, button in window.home_page.punch_buttons.items()
-        if name not in {"出拳次數", "拳頭速度", "出拳軌跡", "拳種辨識"}
+        if name not in {"出拳次數", "拳頭速度", "出拳力量", "出拳軌跡", "拳種辨識"}
     )
     assert not any("拳型辨識" in button.text() for button in window.home_page.punch_buttons.values())
 
@@ -269,11 +269,37 @@ def test_insufficient_sources_are_shown_but_cannot_continue(qtbot) -> None:
 
 
 @pytest.mark.scenario("imu-source-discovery", "user 進入出拳力量")
-def test_punch_force_explains_that_configuration_is_pending(qtbot) -> None:
-    page = make_punch_page(qtbot, "出拳力量")
+@pytest.mark.scenario("imu-source-discovery", "找到同一 Group 的兩顆無線 IMU")
+@pytest.mark.scenario("punch-force-analysis", "user 完成有效的沙袋 IMU 分配")
+def test_punch_force_uses_two_wireless_bag_placements(qtbot) -> None:
+    sources = (
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=0, node_id=0),
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=0, node_id=1),
+    )
+    page = make_punch_page(qtbot, "出拳力量", sources)
+    assert tuple(placement.name for placement in page._source_selectors.values()) == ("沙袋上方", "沙袋下方")
+    first, second = page._source_selectors
+    first.setCurrentIndex(1)
+    second.setCurrentIndex(2)
+    assert page.continue_button.isEnabled()
 
-    assert "配置待決定" in page.status.text()
-    assert len(page._source_selectors) == 0
+
+@pytest.mark.scenario("imu-source-discovery", "user 選擇不同 Group 或不同 Port")
+def test_punch_force_rejects_different_wireless_groups(qtbot) -> None:
+    sources = (
+        ImuSource("COM6", ConnectionType.WIRELESS_RECEIVER, group_id=0, node_id=0),
+        ImuSource("COM7", ConnectionType.WIRELESS_RECEIVER, group_id=1, node_id=1),
+    )
+    page = make_punch_page(qtbot, "出拳力量", sources)
+    # No group has two nodes, so the page never offers an unreliable pair.
+    assert all(selector.count() == 1 for selector in page._source_selectors)
+    assert not page.continue_button.isEnabled()
+
+
+@pytest.mark.scenario("imu-source-discovery", "探索只找到有線 IMU")
+def test_punch_force_does_not_offer_wired_imus(qtbot) -> None:
+    page = make_punch_page(qtbot, "出拳力量", SOURCES[:2])
+    assert all(selector.count() == 1 for selector in page._source_selectors)
     assert not page.continue_button.isEnabled()
 
 

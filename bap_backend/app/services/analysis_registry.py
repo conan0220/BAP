@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from bap_common.analysis_contracts import AnalysisSpecification, ContractError
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisInputDescriptor:
+    """Source identity supplied to descriptor-aware Analysis Executors."""
+
+    csv_id: str
+    source_id: str
+    port: str
+    connection_type: str
+    baud_rate: int
+    group_id: int | None
+    node_id: int | None
 
 
 class AnalysisExecutor(Protocol):

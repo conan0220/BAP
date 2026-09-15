@@ -13,6 +13,7 @@ from typing import Any
 
 from bap_common.analysis_contracts import ContractError
 from bap_common.imu_csv import CommonImuCsvError, inspect_common_imu_csv_bytes
+from bap_backend.app.services.analysis_registry import AnalysisInputDescriptor
 
 
 PUNCH_TYPES = (
@@ -33,15 +34,8 @@ SENSOR_COLUMNS = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class PunchClassificationInputDescriptor:
-    csv_id: str
-    source_id: str
-    port: str
-    connection_type: str
-    baud_rate: int
-    group_id: int | None
-    node_id: int | None
+# Backwards-compatible import name for tests and downstream integrations.
+PunchClassificationInputDescriptor = AnalysisInputDescriptor
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +121,7 @@ class PunchClassificationModelBundle:
 
 
 def validate_descriptors(
-    descriptors: dict[str, PunchClassificationInputDescriptor],
+    descriptors: dict[str, AnalysisInputDescriptor],
 ) -> None:
     if set(descriptors) != set(ROLE_NAMES):
         raise ContractError("missing_input_role", "拳種辨識需要持靶人左手與右手拳靶 IMU")
@@ -362,7 +356,7 @@ class PunchClassificationExecutor:
         *,
         inputs: dict[str, bytes],
         parameters: dict,
-        input_descriptors: dict[str, PunchClassificationInputDescriptor] | None = None,
+        input_descriptors: dict[str, AnalysisInputDescriptor] | None = None,
     ) -> dict:
         if parameters:
             raise ContractError("unknown_parameter", "拳種辨識 version 2 不接受額外參數")

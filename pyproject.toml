@@ -23,6 +23,7 @@ backend = [
     "onnxruntime>=1.20,<2",
     "pyjwt>=2.10,<3",
     "python-multipart>=0.0.20,<1",
+    "scipy>=1.14,<2",
     "sqlalchemy>=2.0,<3",
     "uvicorn>=0.35,<1",
 ]

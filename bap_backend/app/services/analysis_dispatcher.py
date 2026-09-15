@@ -8,8 +8,7 @@ from datetime import datetime
 
 from bap_common.analysis_contracts import ContractError
 from bap_backend.app.repositories import AnalysisSessionRepository
-from bap_backend.app.services.analysis_registry import AnalysisRegistry
-from bap_backend.app.services.punch_classification import PunchClassificationInputDescriptor
+from bap_backend.app.services.analysis_registry import AnalysisInputDescriptor, AnalysisRegistry
 
 
 class AnalysisDispatcher:
@@ -54,7 +53,7 @@ class AnalysisDispatcher:
                     # explicitly so existing analyses remain compatible.
                     if "input_descriptors" in inspect.signature(executor.execute).parameters:
                         arguments["input_descriptors"] = {
-                            binding.input_role: PunchClassificationInputDescriptor(
+                            binding.input_role: AnalysisInputDescriptor(
                                 csv_id=binding.csv_file.id,
                                 source_id=binding.csv_file.source_id,
                                 port=binding.csv_file.port,

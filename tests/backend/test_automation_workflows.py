@@ -85,6 +85,7 @@ def test_candidate_e2e_uses_production_executor_and_rehearses_migration() -> Non
     assert 'username="LegacyBoxer"' in script.replace(" ", "")
     assert "Existing account did not survive migration rehearsal" in script
     assert "Existing update metadata did not survive migration rehearsal" in script
+    assert "bap_backend.tools.test_punch_force_api" in script
     assert 'throw "Installed Desktop Candidate E2E failed."' not in script
     assert "$BackendProcess.WaitForExit(10000)" in script
     assert "for ($Attempt = 1; $Attempt -le 20; $Attempt++)" in script

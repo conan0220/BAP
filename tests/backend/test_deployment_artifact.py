@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import UTC, datetime
 from zipfile import ZipFile
 
@@ -97,3 +98,14 @@ def test_backend_artifact_rejects_sensitive_content(tmp_path, name) -> None:
     _zip(path, {"deployment-manifest.json": json.dumps(_manifest()), name: "secret"})
     with pytest.raises(ValueError):
         validate_zip(path)
+
+
+def test_punch_force_research_tree_and_plotting_dependencies_are_not_backend_runtime_inputs() -> None:
+    root = Path(__file__).resolve().parents[2]
+    builder = (root / "deployment/windows/backend/Build-BapBackendArtifact.ps1").read_text(encoding="utf-8")
+    project = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"punch_force"' not in builder
+    backend_section = project.split("[project.optional-dependencies]", 1)[1].split("desktop =", 1)[0]
+    assert "scipy" in backend_section
+    assert "pandas" not in backend_section
+    assert "matplotlib" not in backend_section

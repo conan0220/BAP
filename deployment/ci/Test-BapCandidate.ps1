@@ -127,6 +127,11 @@ with factory() as session:
         --username "LegacyBoxer" `
         --password "boxing123"
     if ($LASTEXITCODE -ne 0) { throw "Punch classification Artifact E2E failed." }
+    & $Python -m bap_backend.tools.test_punch_force_api `
+        --api-base-url "http://127.0.0.1:12345/api/" `
+        --username "LegacyBoxer" `
+        --password "boxing123"
+    if ($LASTEXITCODE -ne 0) { throw "Punch force Artifact E2E failed." }
     $ExistingRelease = Invoke-RestMethod -Uri "http://127.0.0.1:12345/api/v1/releases/latest?platform=windows" -TimeoutSec 10
     if ($ExistingRelease.source_tree_sha -ne $SourceTreeSha) { throw "Existing update metadata did not survive migration rehearsal." }
 

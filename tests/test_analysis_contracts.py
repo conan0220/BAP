@@ -322,3 +322,67 @@ def test_punch_speed_v2_contract_requires_valid_measurement_boundary() -> None:
     ):
         with pytest.raises(ContractError):
             specification.validate_parameters(parameters)
+
+
+def punch_force_specification() -> AnalysisSpecification:
+    return next(item for item in builtin_analysis_specifications() if item.analysis_type == "punch_force")
+
+
+def valid_punch_force_result() -> dict:
+    return {
+        "algorithm_version": "bag_rigid_body_v1",
+        "peak_elapsed_us": 3_000_000,
+        "peak_force_n": 98.0665,
+        "peak_force_kgf": 10.0,
+        "peak_com_acceleration_g": 0.277778,
+        "impact_height_from_bottom_m": 0.82,
+        "impact_offset_from_center_m": 0.2,
+        "sample_rate_hz": 400.0,
+        "quality_status": "valid",
+        "warnings": [],
+        "curve_points": [
+            {"elapsed_us": 2_200_000, "top_horizontal_acceleration_mps2": 0.0,
+             "bottom_horizontal_acceleration_mps2": 0.0, "angular_acceleration_x_radps2": 0.0,
+             "angular_acceleration_y_radps2": 0.0, "force_kgf": 0.0},
+            {"elapsed_us": 3_000_000, "top_horizontal_acceleration_mps2": 3.0,
+             "bottom_horizontal_acceleration_mps2": 2.0, "angular_acceleration_x_radps2": 0.0,
+             "angular_acceleration_y_radps2": 1.0, "force_kgf": 10.0},
+        ],
+    }
+
+
+@pytest.mark.scenario("analysis-specification-contract", "出拳力量缺少必要參數")
+@pytest.mark.scenario("punch-force-analysis", "user 使用預設沙袋參數")
+@pytest.mark.scenario("punch-force-analysis", "user 輸入不合理的沙袋參數")
+def test_punch_force_parameters_require_complete_positive_physical_values() -> None:
+    spec = punch_force_specification()
+    valid = {
+        "calibration_end_elapsed_us": 2_000_000,
+        "measurement_start_elapsed_us": 2_200_000,
+        "bag_mass_kg": 36.0, "bag_length_m": 1.24,
+        "bag_diameter_m": 0.335, "sensor_distance_m": 1.24,
+    }
+    spec.validate_parameters(valid)
+    invalid = (
+        {}, {**valid, "bag_mass_kg": 0}, {**valid, "bag_mass_kg": float("nan")},
+        {**valid, "sensor_distance_m": 2.0},
+        {**valid, "calibration_end_elapsed_us": 3_000_000},
+    )
+    for value in invalid:
+        with pytest.raises(ContractError):
+            spec.validate_parameters(value)
+
+
+@pytest.mark.scenario("analysis-specification-contract", "出拳力量 Result 的單位或關聯不一致")
+def test_punch_force_result_contract_rejects_inconsistent_semantics() -> None:
+    spec = punch_force_specification()
+    spec.validate_result(valid_punch_force_result())
+    invalid = (
+        {**valid_punch_force_result(), "peak_force_kgf": 99.0},
+        {**valid_punch_force_result(), "quality_status": "warning"},
+        {**valid_punch_force_result(), "curve_points": valid_punch_force_result()["curve_points"] * 151},
+        {**valid_punch_force_result(), "peak_elapsed_us": 9_000_000},
+    )
+    for value in invalid:
+        with pytest.raises(ContractError):
+            spec.validate_result(value)

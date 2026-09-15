@@ -39,9 +39,12 @@ PUNCH_ITEM_DEFINITIONS = {
     "出拳力量": PunchItemDefinition(
         "出拳力量",
         "punch_force",
-        "所需 IMU 數量與安裝位置尚未決定。",
-        (),
-        configuration_decided=False,
+        "指定同一個無線接收器與 Group 下，固定在沙袋上、下方的兩顆 IMU。",
+        (
+            ImuPlacement("bag_top", "沙袋上方", "沙袋"),
+            ImuPlacement("bag_bottom", "沙袋下方", "沙袋"),
+        ),
+        spec_version=1,
     ),
     "出拳軌跡": PunchItemDefinition(
         "出拳軌跡",

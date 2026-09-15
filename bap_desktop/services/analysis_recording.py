@@ -336,6 +336,7 @@ class LiveAnalysisRecording:
         spec_version: int,
         desktop_version: str,
         requested_duration_seconds: int = 60,
+        analysis_parameters: dict | None = None,
         adapter: PortAdapter | None = None,
         monotonic: Callable[[], float] = time.perf_counter,
         wall_clock: Callable[[], float] = time.time,
@@ -354,11 +355,12 @@ class LiveAnalysisRecording:
         self.desktop_version = desktop_version
         self.analysis_type = analysis_type
         self.spec_version = spec_version
-        self.calibration_seconds = (
-            2.0
-            if analysis_type in {"punch_speed", "punch_trajectory"} and spec_version == 2
-            else 0.0
+        self.analysis_parameters = dict(analysis_parameters or {})
+        two_stage = (
+            (analysis_type in {"punch_speed", "punch_trajectory"} and spec_version == 2)
+            or (analysis_type == "punch_force" and spec_version == 1)
         )
+        self.calibration_seconds = 2.0 if two_stage else 0.0
         self.duration = CaptureDuration(requested_duration_seconds)
         self.monotonic = monotonic
         self.assignments = dict(assignments)
@@ -426,16 +428,14 @@ class LiveAnalysisRecording:
         self._measurement_start_elapsed_us = max(
             1, round((current - self.capture.started_monotonic) * 1_000_000)
         )
-        if (
-            self.analysis_type in {"punch_speed", "punch_trajectory"}
-            and self.spec_version == 2
-        ):
-            parameters = {
-                "calibration_end_elapsed_us": self._calibration_end_elapsed_us,
-                "measurement_start_elapsed_us": self._measurement_start_elapsed_us,
-            }
-        else:
-            parameters = {}
+        parameters = dict(self.analysis_parameters)
+        if self.calibration_seconds > 0:
+            parameters.update(
+                {
+                    "calibration_end_elapsed_us": self._calibration_end_elapsed_us,
+                    "measurement_start_elapsed_us": self._measurement_start_elapsed_us,
+                }
+            )
         self.job = build_analysis_request(
             analysis_type=self.analysis_type,
             spec_version=self.spec_version,
