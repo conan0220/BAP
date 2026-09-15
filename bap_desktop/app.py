@@ -392,7 +392,7 @@ def _run_api_e2e(report_progress: Callable[[str], None] | None = None) -> int:
             tokens.access_token,
         )
         force_payload = force_result.get("result", {})
-        if force_payload.get("algorithm_version") != "bag_rigid_body_v1":
+        if force_payload.get("algorithm_version") != "bag_rigid_body_global_max_v1":
             raise RuntimeError("installed Desktop punch-force E2E returned an unexpected algorithm version")
         if not float(force_payload.get("peak_force_kgf", 0)) > 0:
             raise RuntimeError("installed Desktop punch-force E2E returned no positive force")

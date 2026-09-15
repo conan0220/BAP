@@ -38,7 +38,7 @@ BAP 的正式資料格式則是「一顆 IMU 一份 Common IMU CSV」。同一�
 
 - 不把 Force Plate 當成本次測量必需的裝置，也不宣稱 IMU 估算值等同 Force Plate 的直接量測值。
 - 第一版不支援有線 IMU、不同 Port、不同 Group ID，或超過兩顆沙包 IMU 的配置。
-- 第一版每個 Session 只接受一次有效擊打，不處理連續多拳。
+- 第一版 UI 只引導 user 進行一次有效擊打，不另外計算或分離連續多拳；若資料中有多個峰值，結果只代表 global maximum。
 - 不在本 Change 建立 Ground Truth dataset，也不承諾絕對力量準確度。
 - 不把研究版 CLI、批次輸出目錄、pandas DataFrame 或 Backend Matplotlib 視窗帶入正式執行流程。
 - 不修改 DNS、Caddy、TLS、部署流程或 Backend process 管理方式。
@@ -184,15 +184,13 @@ Analysis Job 已保存 `parameters_json`，因此同一份資料之後仍可知�
 
 Backend 加入 SciPy，使用 Butterworth 低通濾波。Backend 不引入 pandas 與 Matplotlib；CSV 使用現有 parser／標準資料結構處理，繪圖由 Desktop 已有的 Matplotlib 完成。
 
-### 7. 沒有一拳或出現多拳時，不回傳假的力量
+### 7. 正式測量區間直接使用力量曲線的 global maximum
 
-正式錄製區間先根據校正雜訊建立 deterministic threshold，再尋找彼此分離的顯著力量峰值。參數會集中在 versioned algorithm configuration 中，並由 synthetic fixtures 鎖定行為。
+本 Change 遵循 `punch_force/README.md` 與原始 `punch_force.py` 的做法：正式測量區間只找一次 `argmax`，並用該點同時計算最大力量與擊中位置。
 
-- 找不到有效峰值：Analysis Job 失敗，UI 提示「未偵測到有效擊打，請重新測量」。
-- 找到一個有效峰值：計算該拳的結果。
-- 找到兩個以上有效峰值：Analysis Job 失敗，UI 提示第一版一次只能擊打一拳。
+第一版 UI 仍會明確要求 user 一次只擊打一拳。不過演算法不使用 `find_peaks` 計算局部峰值數量，因為沙袋被擊中後的振動也可能產生其他局部峰值，不能直接把它們視為多次出拳。如果 user 實際打了多拳，結果會代表其中力量曲線最大的那一點；本分析不負責計算出拳次數。
 
-這個策略比直接取整段訊號最大值安全，因為直接取最大值可能把啟動震動或雜訊誤當成拳擊力量。
+結果中的 `algorithm_version` 使用 `bag_rigid_body_global_max_v1`，讓 Desktop 與 Backend 能明確確認彼此使用相同契約。
 
 ### 8. 資料可算不代表資料完美；可用警告與不可用錯誤分開處理
 
@@ -203,7 +201,7 @@ Backend 加入 SciPy，使用 Butterworth 低通濾波。Backend 不引入 panda
 - 兩顆 IMU 的旋轉訊號差異過大，可能沒有固定牢靠。
 - 估算擊中位置超出沙包實體長度。
 
-CSV 無資料、來源不符、必要欄位無效、取樣率不足以計算、缺口過多、沒有有效擊打或同一 Session 有多拳，則讓 Job 失敗。對 user 顯示安全的白話訊息；詳細 stack trace 只留在 Backend log。
+CSV 無資料、來源不符、必要欄位無效、取樣率不足以計算、缺口過多，或正式測量區間沒有可用的正力量資料，則讓 Job 失敗。對 user 顯示安全的白話訊息；詳細 stack trace 只留在 Backend log。
 
 ### 9. Result 同時服務數值閱讀與內嵌曲線圖
 
@@ -273,7 +271,7 @@ BAP/
 - 用已知的合成上下加速度，驗證 N、kgf、質心加速度、角加速度與擊中位置公式。
 - 驗證 `packet_index` 完整對齊、少量插值、開頭／結尾缺口、連續缺口過大與總缺口過大。
 - 驗證四元數正規化、靜止校正、濾波與取樣率估算。
-- 驗證無拳、單拳、多拳的 deterministic 結果。
+- 驗證無可用正力量、單一峰值與多個局部峰值皆得到 deterministic 結果，且多個局部峰值選擇 global maximum。
 - 驗證曲線降採樣不超過 300 點，且保留第一點、最後一點與峰值。
 - 驗證既有出拳次數、速度、軌跡與拳種辨識 Executor 不受共用 descriptor 重構影響。
 
@@ -286,13 +284,13 @@ BAP/
 ### Desktop scenario tests
 
 - 掃描、合法／非法 IMU 指派、沙包參數驗證、校正、正式錄製、提前結束、分析等待、結果與重新測量。
-- Backend 不支援、網路錯誤、沒有一拳、多拳與 Quality Warning 的白話顯示。
+- Backend 不支援、網路錯誤、沒有可用正力量與 Quality Warning 的白話顯示，並確認多個局部峰值可顯示 global maximum 結果。
 - 確認結果頁可嵌入曲線，而且 user 不需要開外部視窗。
 
 ### Artifact and manual tests
 
 - Windows candidate 安裝後，以 production-like Backend 跑完整 Artifact E2E。
-- 使用兩顆固定在實體沙包上下方的無線 IMU 做人工測量；確認流程可完成、曲線合理、一次多拳會被拒絕。
+- 使用兩顆固定在實體沙包上下方的無線 IMU 做人工測量；確認流程可完成、曲線合理，且資料含多個峰值時回傳正式測量區間的 global maximum。
 - 在沒有 Force Plate Ground Truth 的情況下，只能把人工測試結果記為「流程與數值合理性驗證」，不能宣稱絕對精度已被證明。
 
 ## Risks / Trade-offs
@@ -302,7 +300,7 @@ BAP/
 - **[兩顆 IMU 沒有固定牢靠或方向不一致]** → 校正前顯示擺放要求，Backend 做旋轉訊號一致性檢查並回傳 Quality Warning 或 error。
 - **[無線封包遺失會破壞上下感測器對齊]** → 只用 `packet_index` 配對，限制可插值的缺口並保留原始 CSV。
 - **[低通濾波可能壓低真正峰值]** → cutoff 依實際取樣率安全限制，參數納入演算法版本並以 synthetic regression test 固定。
-- **[過於敏感的峰值偵測會把雜訊當作拳，多拳判定也可能誤判]** → 使用校正雜訊建立 threshold、設定最小峰距，並將參數集中版本化；人工測試後才調整。
+- **[global maximum 可能選到振動或多拳中的最大值]** → UI 明確要求一次只擊打一拳；結果代表正式測量區間力量曲線最大的時間點。
 - **[SciPy 增加 Backend Artifact 體積與 build 時間]** → 只在 Backend 加入必要依賴；不加入 pandas 與 Backend Matplotlib，CI 需要驗證乾淨 Windows build。
 - **[共用 input descriptor 重構可能影響拳種辨識]** → 保持 API payload 不變，先加相容測試，再逐一切換既有 Executor。
 

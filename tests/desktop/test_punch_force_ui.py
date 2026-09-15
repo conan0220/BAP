@@ -39,7 +39,7 @@ def page_with_assignments(qtbot):
 def result(*, warning=False):
     warnings = ["實際取樣率低於建議值。"] if warning else []
     return {
-        "algorithm_version": "bag_rigid_body_v1", "peak_elapsed_us": 3_000_000,
+        "algorithm_version": "bag_rigid_body_global_max_v1", "peak_elapsed_us": 3_000_000,
         "peak_force_n": 98.0665, "peak_force_kgf": 10.0,
         "peak_com_acceleration_g": 0.277778,
         "impact_height_from_bottom_m": 0.82, "impact_offset_from_center_m": 0.2,

@@ -41,12 +41,12 @@
 ## 5. 實作 Backend 力量演算法與 Executor
 
 - [x] 5.1 實作沙包橫向轉動慣量、質心加速度、N／kgf 力量、角加速度、從底部量起的擊中高度與中心偏移計算，並清楚固定所有 SI units。
-- [x] 5.2 實作版本化單拳事件偵測，以校正雜訊建立 threshold 並辨認分離峰值，不得直接把整段最大雜訊當作成功 Result。
+- [x] 5.2 依 README 實作版本化力量選點：只在正式測量區間找力量曲線的 global maximum，並使用同一點計算最大力量與擊中位置。
 - [x] 5.3 實作資料品質評估，至少涵蓋少量 Packet 插值、低於建議取樣率、上下 IMU Gyroscope 不一致及擊中位置超出沙包長度。
 - [x] 5.4 實作不超過 300 筆的 deterministic `curve_points`，保留第一點、最後一點與力量峰值點。
-- [x] 5.5 實作 `PunchForceExecutor`，將解析、對齊、校正、濾波、單拳偵測、物理計算、品質檢查及 Result 組裝接到 Analysis Dispatcher。
+- [x] 5.5 實作 `PunchForceExecutor`，將解析、對齊、校正、濾波、global maximum 選點、物理計算、品質檢查及 Result 組裝接到 Analysis Dispatcher。
 - [x] 5.6 將 `punch_force` version 1 Production Executor 註冊到 Backend capability registry，並將內部例外轉成不含路徑、stack trace 或敏感資訊的安全錯誤。
-- [x] 5.7 新增演算法 Scenario tests，驗證單拳 deterministic Result、相同資料搭配不同質量、N／kgf 換算、無拳、多拳、非有限運算、Gyroscope 不一致、位置超界與警告狀態。
+- [x] 5.7 新增演算法 Scenario tests，驗證 deterministic Result、相同資料搭配不同質量、N／kgf 換算、無可用正力量、多個局部峰值選 global maximum、非有限運算、Gyroscope 不一致、位置超界與警告狀態。
 - [x] 5.8 新增曲線 Scenario tests，驗證 300 點上限、時間排序、必要欄位有限、首尾與峰值保留，以及降採樣不修改完整計算資料。
 
 ## 6. 驗證 Session API 與資料保存
@@ -54,7 +54,7 @@
 - [x] 6.1 新增 API integration test，以兩份 Fake Common IMU CSV、完整 metadata、兩個 Input Bindings 與沙包 Parameters 建立 `punch_force` version 1 Session 並取得成功 Result。
 - [x] 6.2 驗證 `analysis_jobs.parameters_json`、兩份 `imu_csv_files.csv_blob`、bindings 與 `analysis_results.result_json` 都能保存及讀回，而且不需要 database migration 或力量專用 table。
 - [x] 6.3 驗證相同 Inputs、Parameters 與 `algorithm_version` 重跑會得到相同 Result，改變有效 `bag_mass_kg` 則依新 Parameters 重新計算。
-- [x] 6.4 新增 API failure tests，涵蓋缺少必要參數、來源不符、CSV 無資料／損壞、Packet 缺口過多、無拳、多拳、取樣率不足與非有限結果，並確認 Job 失敗但原始 CSV 仍保留。
+- [x] 6.4 新增 API failure tests，涵蓋缺少必要參數、來源不符、CSV 無資料／損壞、Packet 缺口過多、無可用正力量、取樣率不足與非有限結果，並確認 Job 失敗但原始 CSV 仍保留；多個局部峰值則驗證選擇 global maximum 並成功完成。
 
 ## 7. 實作 Desktop IMU 分配與沙包設定
 
@@ -78,7 +78,7 @@
 - [x] 9.1 實作出拳力量 Result view，顯示最大力量 kgf／N、擊中高度、中心偏移、峰值時間、質心加速度、實際取樣率與品質狀態。
 - [x] 9.2 以內嵌 Matplotlib 顯示上／下方水平加速度、X／Y 角加速度、力量曲線及峰值，不開外部視窗。
 - [x] 9.3 逐項以文字顯示 warnings，不只用顏色表達；頁面明確說明結果是 IMU 與沙包模型的估算值，不是 Force Plate 直接量測。
-- [x] 9.4 實作「重新測量」回到 IMU 掃描階段，並為無拳、多拳、取樣率不足、Packet 無法對齊、Backend 不支援及網路失敗顯示對應白話訊息。
+- [x] 9.4 實作「重新測量」回到 IMU 掃描階段，並為無可用正力量、取樣率不足、Packet 無法對齊、Backend 不支援及網路失敗顯示對應白話訊息。
 - [x] 9.5 新增 Result Scenario tests，驗證正常 Result、warning Result、單位與曲線、估算說明、安全錯誤、重新測量及 Matplotlib 建立失敗時仍保留文字摘要與操作。
 
 ## 10. 完整驗證與發布準備
@@ -87,8 +87,8 @@
 - [x] 10.2 執行完整 Source-level test suite，確認帳號、更新、Session、IMU 掃描、出拳次數、速度、軌跡、拳種辨識及部署測試沒有回歸。
 - [ ] 10.3 提升 Desktop version，建立 Backend 與 Windows Desktop candidate Artifacts，驗證正式 Artifact 不包含 `punch_force/` 研究資料、批次輸出、pandas 或 Backend Matplotlib。
 - [ ] 10.4 執行 Artifact E2E：從安裝後 Desktop 透過實際 HTTP 呼叫 candidate Backend，完成能力查詢、兩份 Fake CSV Session、Job polling、Result schema、曲線與重新測量。
-- [ ] 10.5 以 Artifact E2E 驗證無拳、多拳、非法來源、缺口過多及 warning Result，確認 UI 不顯示假力量且 logs 可供診斷。
+- [ ] 10.5 以 Artifact E2E 驗證無可用正力量、多個局部峰值選 global maximum、非法來源、缺口過多及 warning Result，確認 UI 不顯示假力量且 logs 可供診斷。
 - [ ] 10.6 使用固定在實體沙包上、下方的兩顆無線 IMU 人工完成一次單拳測量，檢查取樣率、曲線、力量、擊中位置、品質訊息與重新測量 flow。
-- [ ] 10.7 使用實體 IMU 人工驗證靜止無拳、一次錄製多拳、鬆動或位置選反等案例；確認系統拒絕不可靠結果或顯示正確警告。
+- [ ] 10.7 使用實體 IMU 人工驗證靜止無拳、一次錄製多拳、鬆動或位置選反等案例；確認多拳錄製回傳 global maximum，其餘不可靠資料被拒絕或顯示正確警告。
 - [x] 10.8 記錄 Prototype 尚未用 Force Plate Ground Truth 驗證絕對精度的限制；不得把人工合理性檢查寫成準確度已證明。
 

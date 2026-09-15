@@ -24,7 +24,7 @@ from bap_common.imu_csv import CommonImuCsvError, inspect_common_imu_csv_bytes
 
 
 GRAVITY_MPS2 = 9.80665
-ALGORITHM_VERSION = "bag_rigid_body_v1"
+ALGORITHM_VERSION = "bag_rigid_body_global_max_v1"
 ROLE_NAMES = ("bag_top", "bag_bottom")
 MAXIMUM_DISPLAY_POINTS = 300
 
@@ -39,9 +39,6 @@ class PunchForceConfig:
     maximum_gap_ratio: float = 0.05
     cutoff_hz: float = 200.0
     filter_order: int = 4
-    minimum_peak_force_kgf: float = 5.0
-    minimum_peak_prominence_kgf: float = 2.0
-    minimum_peak_distance_seconds: float = 0.15
 
 
 CONFIG = PunchForceConfig()
@@ -372,7 +369,6 @@ def analyze_force(
     config: PunchForceConfig = CONFIG,
 ) -> dict[str, Any]:
     import numpy as np
-    from scipy.signal import find_peaks
 
     validate_descriptors(input_descriptors)
     calibration_end, measurement_start, mass, length, diameter, distance = _validated_parameters(parameters)
@@ -411,24 +407,16 @@ def analyze_force(
     force_n = mass * np.linalg.norm(center, axis=1)
     force_kgf = force_n / GRAVITY_MPS2
 
-    calibration_force = force_kgf[:calibration_count]
-    noise_median = float(np.median(calibration_force))
-    noise_mad = float(np.median(np.abs(calibration_force - noise_median)))
-    threshold = max(config.minimum_peak_force_kgf, noise_median + 8.0 * noise_mad)
-    prominence = max(config.minimum_peak_prominence_kgf, 4.0 * noise_mad)
     formal_force = force_kgf[measurement_index:]
-    peaks, _properties = find_peaks(
-        formal_force,
-        height=threshold,
-        prominence=prominence,
-        distance=max(1, round(config.minimum_peak_distance_seconds * frames.sample_rate_hz)),
-    )
-    if len(peaks) == 0:
-        raise ContractError("no_valid_strike", "本次沒有偵測到有效擊打，請重新測量")
-    if len(peaks) > 1:
-        raise ContractError("multiple_strikes", "第一版出拳力量一次只能擊打沙袋一拳")
-    peak_index = measurement_index + int(peaks[0])
+    # Follow punch_force/README.md: the recording contains one intended hit, so
+    # the result is the global maximum of the formal measurement force curve.
+    # Bag vibration may create other local maxima; they are not treated as
+    # additional punches by this algorithm.
+    formal_peak = int(np.argmax(formal_force))
+    peak_index = measurement_index + formal_peak
     peak_force_n = float(force_n[peak_index])
+    if not math.isfinite(peak_force_n) or peak_force_n <= 1e-12:
+        raise ContractError("no_valid_strike", "正式測量區間沒有可用的正力量資料，請重新測量")
     center_magnitude = float(np.linalg.norm(center[peak_index]))
     direction = center[peak_index] / max(center_magnitude, 1e-12)
     normal_axis = np.asarray((-direction[1], direction[0]))

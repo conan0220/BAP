@@ -102,24 +102,25 @@ Backend MUST 將兩顆 IMU 的加速度轉換為共同座標、移除靜止校�
 - **THEN** Backend 依每次 Analysis Parameters 分別計算力量
 - **AND** Result 不偷偷沿用前一次或程式預設的沙袋質量
 
-### Requirement: 無法可靠辨認單次打擊時不得回傳假力量
-Backend MUST 驗證 Quaternion、有限 sensor 數值、校正穩定性、實際取樣率、有效打擊數量與計算結果。沒有明顯打擊、偵測到多次打擊、必要資料不足或運算產生非有限數值時，Analysis Job MUST 標示為失敗，不得以背景雜訊的最大值或固定數字假裝成功。
+### Requirement: 正式測量區間使用力量曲線的 global maximum
+系統 MUST 只在 `measurement_start_elapsed_us` 之後的正式測量區間找力量曲線的 global maximum，並 MUST 使用同一個時間點計算最大力量與擊中位置。第一版仍會提示 user 一次只擊打一拳，但系統 MUST NOT 因力量曲線出現多個局部峰值就拒絕結果，因為沙袋振動本身也可能產生局部峰值。
 
-#### Scenario: 正式資料沒有有效打擊
-- **WHEN** 正式資料只有靜止或背景雜訊，沒有符合版本化規則的打擊
-- **THEN** Analysis Job 標示為失敗
-- **AND** Desktop App 說明本次沒有偵測到有效打擊
-- **AND** 不顯示虛假的力量數值
+#### Scenario: 正式測量區間沒有可用的正力量資料
+- **WHEN** 正式測量區間的 global maximum 不是有限且大於零的力量
+- **THEN** Backend MUST 將 Analysis 標記為失敗
+- **AND** MUST 回傳安全且可理解的錯誤訊息
+- **AND** MUST NOT 回傳假的力量或擊中位置
 
-#### Scenario: 正式資料包含多次打擊
-- **WHEN** 正式資料包含兩次以上符合規則的獨立打擊
-- **THEN** Analysis Job 標示為失敗
-- **AND** Desktop App 提醒一場出拳力量測量只能打擊一次
+#### Scenario: 正式資料包含多個局部峰值
+- **WHEN** 力量曲線在正式測量區間包含多個局部峰值
+- **THEN** Backend MUST 選擇整段正式測量區間的 global maximum
+- **AND** MUST 使用該點計算最大力量與擊中位置
+- **AND** MUST NOT 將多個局部峰值直接判定為多次擊打
 
-#### Scenario: 取樣率低於可靠分析範圍
-- **WHEN** 實際取樣率低於演算法版本允許的最低值
-- **THEN** Analysis Job 標示為失敗
-- **AND** Desktop App 說明取樣率不足
+#### Scenario: 取樣率低於最低門檻
+- **WHEN** 任一必要 IMU CSV 的有效取樣率低於 100 Hz
+- **THEN** Backend MUST 將 Analysis 標記為失敗
+- **AND** MUST 回傳重新檢查 IMU 或重新測量的安全提示
 
 ### Requirement: 可完成但需要注意的資料品質必須顯示警告
 Backend MUST 將不需要拒絕分析、但可能影響可信度的狀況放入 `warnings`，並將 `quality_status` 設為 `warning`。至少 MUST 涵蓋少量 Packet 插值、取樣率低於建議值、兩顆 IMU 的 Gyroscope 行為不一致，以及估算打擊位置超出沙袋長度；沒有警告時 `quality_status` MUST 為 `valid`。

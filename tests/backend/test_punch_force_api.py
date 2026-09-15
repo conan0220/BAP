@@ -57,7 +57,7 @@ def package(*, strikes=(3.0,), sample_rate=400, missing_top=frozenset()):
     )
     now = datetime.now(timezone.utc)
     metadata = SessionMetadata(
-        session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.22",
+        session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.23",
         started_at=now, ended_at=now, requested_duration_seconds=5,
         actual_duration_seconds=4.2, stop_reason=SessionStopReason.ENDED_BY_USER,
         csv_files=tuple(descriptors), analyses=(job,),
@@ -122,11 +122,23 @@ def test_failed_force_analysis_keeps_csv_and_returns_safe_error(backend_context)
         assert len(tuple(session.scalars(select(ImuCsvFile)))) == 2
 
 
+@pytest.mark.scenario("punch-force-analysis", "正式資料包含多個局部峰值")
+def test_multiple_local_peaks_complete_with_global_maximum_over_http(backend_context):
+    client, _factory, settings, _now = backend_context
+    metadata, contents = package(strikes=(2.8, 3.4))
+    headers = authenticated(client, settings)
+    assert upload(client, headers, metadata, contents).status_code == 202
+    endpoint = f"/api/v1/measurement-sessions/{metadata.session_id}/analyses/{metadata.analyses[0].analysis_id}"
+    payload = client.get(endpoint, headers=headers).json()
+    assert payload["status"] == "completed"
+    assert payload["result"]["algorithm_version"] == "bag_rigid_body_global_max_v1"
+    assert payload["result"]["peak_elapsed_us"] == pytest.approx(2_800_000, abs=5_000)
+
+
 @pytest.mark.parametrize(
     ("case", "expected_code"),
     (
         ("no_strike", "no_valid_strike"),
-        ("multiple_strikes", "multiple_strikes"),
         ("low_sample_rate", "invalid_sample_rate"),
         ("packet_gap", "packet_alignment_failed"),
         ("different_group", "different_gateway"),
@@ -136,8 +148,6 @@ def test_runtime_force_failures_keep_original_csv_for_diagnosis(backend_context,
     client, factory, settings, _now = backend_context
     if case == "no_strike":
         metadata, contents = package(strikes=())
-    elif case == "multiple_strikes":
-        metadata, contents = package(strikes=(2.8, 3.4))
     elif case == "low_sample_rate":
         metadata, contents = package(sample_rate=80)
     elif case == "packet_gap":
