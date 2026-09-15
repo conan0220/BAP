@@ -31,6 +31,7 @@ def _csv(
     strikes: tuple[float, ...] = (3.0,),
     sample_rate: int = 400,
     missing: frozenset[int] = frozenset(),
+    timestamp_batch_us: int | None = None,
 ) -> bytes:
     mass, length, diameter, impact_offset = 36.0, 1.24, 0.335, 0.2
     inertia = mass * (3.0 * (diameter / 2.0) ** 2 + length**2) / 12.0
@@ -58,7 +59,11 @@ def _csv(
         row.update(
             sample_index=row_index,
             packet_index=packet,
-            elapsed_us=round(seconds * 1_000_000),
+            elapsed_us=(
+                (round(seconds * 1_000_000) // timestamp_batch_us) * timestamp_batch_us
+                if timestamp_batch_us
+                else round(seconds * 1_000_000)
+            ),
             device_time_ms=round(seconds * 1000),
             frame_type="0x63",
             acc_x_g=horizontal / 9.80665,
@@ -81,6 +86,7 @@ def _package(case: str) -> tuple[SessionMetadata, dict[str, bytes]]:
     strikes: tuple[float, ...] = (3.0,)
     sample_rate = 400
     missing_top: frozenset[int] = frozenset()
+    timestamp_batch_us: int | None = None
     if case == "no_strike":
         strikes = ()
     elif case == "multiple_strikes":
@@ -89,10 +95,18 @@ def _package(case: str) -> tuple[SessionMetadata, dict[str, bytes]]:
         sample_rate = 125
     elif case == "packet_gap":
         missing_top = frozenset(range(1000, 1006))
+    elif case == "batched_timestamps":
+        timestamp_batch_us = 5_000
 
     contents = {
-        "bag-top.csv": _csv("bag_top", strikes=strikes, sample_rate=sample_rate, missing=missing_top),
-        "bag-bottom.csv": _csv("bag_bottom", strikes=strikes, sample_rate=sample_rate),
+        "bag-top.csv": _csv(
+            "bag_top", strikes=strikes, sample_rate=sample_rate,
+            missing=missing_top, timestamp_batch_us=timestamp_batch_us,
+        ),
+        "bag-bottom.csv": _csv(
+            "bag_bottom", strikes=strikes, sample_rate=sample_rate,
+            timestamp_batch_us=timestamp_batch_us,
+        ),
     }
     descriptors = []
     for node_id, (filename, data) in enumerate(contents.items()):
@@ -206,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
         if len(result["curve_points"]) > 300:
             raise RuntimeError("punch-force curve exceeded display limit")
 
+        batched = _run_case(client, headers, "batched_timestamps")
+        if batched["status"] != "completed" or batched["result"]["peak_force_kgf"] <= 0:
+            raise RuntimeError(f"batched timestamp punch-force case failed: {batched}")
+
         warning = _run_case(client, headers, "warning")
         if warning["status"] != "completed" or warning["result"]["quality_status"] != "warning":
             raise RuntimeError(f"warning punch-force case did not remain visible: {warning}")
@@ -220,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "status": "passed",
             "algorithm_version": result["algorithm_version"],
-            "cases": ["valid", "warning", *expected_failures],
+            "cases": ["valid", "batched_timestamps", "warning", *expected_failures],
         }))
     return 0
 
