@@ -153,12 +153,13 @@ Backend MUST 將不需要拒絕分析、但可能影響可信度的狀況放入 
 - **AND** Backend 保存的原始 Common IMU CSV 不被改寫
 
 ### Requirement: Desktop App 必須清楚呈現力量、位置與品質
-Desktop App MUST 在 Result 通過契約驗證後顯示最大打擊力的 kgf 與 N、打擊位置、峰值時間、實際取樣率、資料品質及 warnings。Desktop App MUST 以內嵌曲線顯示上、下方 IMU 加速度、角加速度與力量峰值，並 MUST 保留「重新測量」操作；畫面 MUST 說明力量與位置是 IMU 模型估算值，不是 Force Plate 直接量測值。
+Desktop App MUST 在 Result 通過契約驗證後顯示最大打擊力的 kgf 與 N、打擊位置、峰值時間、實際取樣率、資料品質及 warnings。Desktop App MUST 以內嵌曲線顯示上、下方 IMU 加速度、角加速度與力量峰值；圖表內可見的座標軸名稱、圖例及峰值標記 MUST 使用英文，避免 Matplotlib 缺少中文字型時顯示亂碼。Desktop App MUST 保留「重新測量」操作；畫面 MUST 說明力量與位置是 IMU 模型估算值，不是 Force Plate 直接量測值。
 
 #### Scenario: user 查看正常 Result
 - **WHEN** Backend 回傳 `quality_status` 為 `valid` 的有效 Result
 - **THEN** Desktop App 顯示最大力量、兩種力量單位、打擊位置、峰值時間與取樣率
 - **AND** 曲線能辨認力量峰值
+- **AND** 圖表內的座標軸、圖例與峰值標記使用英文
 - **AND** 畫面提供重新測量
 
 #### Scenario: user 查看具有警告的 Result

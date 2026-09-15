@@ -76,10 +76,10 @@
 ## 9. 實作 Desktop Result 與錯誤呈現
 
 - [x] 9.1 實作出拳力量 Result view，顯示最大力量 kgf／N、擊中高度、中心偏移、峰值時間、質心加速度、實際取樣率與品質狀態。
-- [x] 9.2 以內嵌 Matplotlib 顯示上／下方水平加速度、X／Y 角加速度、力量曲線及峰值，不開外部視窗。
+- [x] 9.2 以內嵌 Matplotlib 顯示上／下方水平加速度、X／Y 角加速度、力量曲線及峰值，圖表內可見文字使用英文，且不開外部視窗。
 - [x] 9.3 逐項以文字顯示 warnings，不只用顏色表達；頁面明確說明結果是 IMU 與沙包模型的估算值，不是 Force Plate 直接量測。
 - [x] 9.4 實作「重新測量」回到 IMU 掃描階段，並為無可用正力量、取樣率不足、Packet 無法對齊、Backend 不支援及網路失敗顯示對應白話訊息。
-- [x] 9.5 新增 Result Scenario tests，驗證正常 Result、warning Result、單位與曲線、估算說明、安全錯誤、重新測量及 Matplotlib 建立失敗時仍保留文字摘要與操作。
+- [x] 9.5 新增 Result Scenario tests，驗證正常 Result、warning Result、單位與曲線、英文圖表文字、估算說明、安全錯誤、重新測量及 Matplotlib 建立失敗時仍保留文字摘要與操作。
 
 ## 10. 完整驗證與發布準備
 
