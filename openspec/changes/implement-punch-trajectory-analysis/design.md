@@ -114,7 +114,7 @@ Prototype 假設左右手腕 IMU 依 UI 示意以一致方向安裝。user 校�
 - `+Y`：user 正前方。
 - `+Z`：向上。
 
-若校正 Quaternion 變動過大、無法正規化或兩顆 IMU 推得的 heading 明顯不一致，Executor 回報校正失敗，不猜測方向。這個 Prototype 假設必須在 UI 說明，後續若實機證明準備姿勢無法穩定推得 heading，再另開 Change 導入明確的方向校正動作。
+若校正 Quaternion 變動過大，但資料仍可正規化及運算，Executor 使用第一筆有效姿態作為 deterministic fallback，完成分析並以 `quality_status = warning` 和 `warnings` 說明方向或位置漂移可能較大。若不穩定造成左右 heading 不一致，則以左手腕方向作為本次參考並增加警告。只有 Quaternion 無法正規化、校正或正式資料不足、時間軸無法使用等輸入本身不能運算的情況才讓 Job 失敗。
 
 ### 5. 使用版本化、可重新驗證的 Result JSON
 
@@ -127,6 +127,8 @@ distance_unit
 left_punch_count
 right_punch_count
 total_punch_count
+quality_status
+warnings[]
 trajectories[]
 └─ hand, punch_index, start_elapsed_us, end_elapsed_us
    duration_seconds, path_length_m, maximum_displacement_m

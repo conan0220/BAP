@@ -26,12 +26,19 @@
 - **AND** 畫面尚不要求 user 輸入正式錄製時間
 
 #### Scenario: 校正完成後開始正式測量
-- **WHEN** 左右手腕都完成兩秒有效校正
+- **WHEN** 左右手腕都完成兩秒校正資料錄製
 - **THEN** Desktop App 說明校正已完成
 - **AND** 讓 user 輸入 5 至 3600 秒的正式錄製時間
 - **AND** 等 user 按下「開始正式測量」後才開始計算正式錄製時間
 - **AND** Session Metadata 的 Analysis Parameters 包含有效的 `calibration_end_elapsed_us` 與 `measurement_start_elapsed_us`
 - **AND** user 在兩個時間點之間的操作或準備動作不影響校正穩定性判斷
+
+#### Scenario: 校正期間姿態不穩定
+- **WHEN** 校正資料可讀取及運算，但 Quaternion 變動超過穩定門檻
+- **THEN** Backend MUST 使用 deterministic fallback 繼續產生軌跡
+- **AND** Result 的 `quality_status` MUST 為 `warning`
+- **AND** `warnings` MUST 說明方向或位置漂移可能較大
+- **AND** Desktop App MUST 顯示警告及分析結果，不得只因校正不穩定而停止分析
 
 #### Scenario: 校正期間 IMU 中斷
 - **WHEN** 任一必要 IMU 在校正完成以前中斷
@@ -55,7 +62,7 @@ Backend MUST 對左右手腕分別找出有效出拳區段，並 MUST 對每一�
 - **AND** 系統不捏造軌跡
 
 ### Requirement: 軌跡 Result 必須版本化且限制顯示資料量
-`punch_trajectory` version 2 Result MUST 包含 `algorithm_version`、`coordinate_system`、`distance_unit`、`left_punch_count`、`right_punch_count`、`total_punch_count` 與 `trajectories`。每一筆 trajectory MUST 包含 `hand`、`punch_index`、`start_elapsed_us`、`end_elapsed_us`、`duration_seconds`、`path_length_m`、`maximum_displacement_m` 與 `points`；每拳回傳的顯示用 `points` MUST 介於 2 至 300 筆，且原始高頻 Common IMU CSV MUST 保持不變。
+`punch_trajectory` version 2 Result MUST 包含 `algorithm_version`、`coordinate_system`、`distance_unit`、`left_punch_count`、`right_punch_count`、`total_punch_count`、`quality_status`、`warnings` 與 `trajectories`。每一筆 trajectory MUST 包含 `hand`、`punch_index`、`start_elapsed_us`、`end_elapsed_us`、`duration_seconds`、`path_length_m`、`maximum_displacement_m` 與 `points`；每拳回傳的顯示用 `points` MUST 介於 2 至 300 筆，且原始高頻 Common IMU CSV MUST 保持不變。
 
 #### Scenario: Backend 回傳一拳的有效軌跡
 - **WHEN** Backend 成功重建一拳軌跡
@@ -72,7 +79,7 @@ Backend MUST 對左右手腕分別找出有效出拳區段，並 MUST 對每一�
 - **AND** Backend 保存的原始 Common IMU CSV 不因降採樣而被改寫
 
 ### Requirement: 無法可靠分析時不得回傳假軌跡
-Backend MUST 驗證必要欄位、時間順序、Quaternion、校正資料與取樣品質。資料不足、無效或運算產生非有限數值時，Analysis Job MUST 標示為失敗並回傳不含內部敏感資訊的說明，不得用零值、隨機點或固定圖形假裝成功。
+Backend MUST 驗證必要欄位、時間順序、Quaternion、校正資料與取樣品質。校正姿態不穩定但資料仍可運算時 MUST 以 warning 完成分析；只有輸入資料不足、無效或運算產生非有限數值時，Analysis Job 才 MUST 標示為失敗並回傳不含內部敏感資訊的說明，不得用零值、隨機點或固定圖形假裝成功。
 
 #### Scenario: CSV 缺少有效 Quaternion
 - **WHEN** 任一必要 CSV 缺少有效且可正規化的 Quaternion

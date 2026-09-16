@@ -25,14 +25,14 @@
 - [x] 3.1 建立共用 IMU Motion 資料模型與 Common IMU CSV 解析，支援重複批次時間、實際取樣週期、Quaternion 正規化及所有必要 sensor 欄位驗證。
 - [x] 3.2 抽出世界座標旋轉、靜止基準、Punch windows、加速度平滑與速度積分，讓拳頭速度改用共用介面。
 - [x] 3.3 執行全部拳頭速度與出拳次數回歸測試，確認重構沒有改變既有 Analysis Result 或錯誤契約。
-- [x] 3.4 實作 Session heading 建立與校正品質檢查，將結果統一為 X 向右、Y 向前、Z 向上的 Session Local Coordinate System。
-- [x] 3.5 新增 Synthetic tests，涵蓋有效靜止校正、Quaternion 無效、校正資料不足、校正姿態變動過大及左右 heading 不一致。
+- [x] 3.4 實作 Session heading 建立與校正品質檢查；校正不穩定時使用 deterministic fallback 並產生 warning，將結果統一為 X 向右、Y 向前、Z 向上的 Session Local Coordinate System。
+- [x] 3.5 新增 Synthetic tests，涵蓋有效靜止校正、Quaternion 無效、校正資料不足、校正姿態變動過大轉為 warning，以及左右 heading 不一致。
 
 ## 4. 實作 Backend 逐拳軌跡
 
 - [x] 4.1 實作單拳速度 Drift correction、位置梯形積分、起點歸零、路徑長度及最大位移計算。
 - [x] 4.2 實作 deterministic display-point 選取，超過 300 點時保留首尾並縮減資料，且不修改原始 Common IMU CSV。
-- [x] 4.3 實作左右手多拳 Trajectory Executor，產生版本、座標系統、單位、拳數與 trajectories Result；沒有偵測到拳時回傳有效空結果。
+- [x] 4.3 實作左右手多拳 Trajectory Executor，產生版本、座標系統、單位、拳數、品質、warnings 與 trajectories Result；沒有偵測到拳時回傳有效空結果。
 - [x] 4.4 將 `punch_trajectory` version 2 Production Executor 註冊到 Backend，並把資料問題轉成不含內部路徑或例外細節的安全錯誤。
 - [x] 4.5 新增 Backend Scenario tests，涵蓋左右手多拳、每拳從原點開始、上一拳 Drift 不延續、沒有出拳、點數上限、缺少 Quaternion、非有限運算及 deterministic output。
 
@@ -40,14 +40,14 @@
 
 - [x] 5.1 新增 API Integration test，使用兩份 Fake Common IMU CSV 建立 version 2 Session，驗證 upload、Job processing、Result polling 與完整 Result schema。
 - [x] 5.2 驗證 `analysis_results.result_json` 能保存並讀回最大允許點數的 Result，且 `imu_csv_files.csv_blob` 的內容與 checksum 沒有被降採樣流程改寫。
-- [x] 5.3 驗證無效 CSV 或校正資料使 Job 失敗但保留原始 CSV，重新分析不要求 Desktop 再次上傳。
+- [x] 5.3 驗證無法運算的 CSV 或校正資料使 Job 失敗但保留原始 CSV；校正不穩定則完成 Job 並保存 warning，重新分析不要求 Desktop 再次上傳。
 
 ## 6. 實作 Desktop 校正與正式錄製流程
 
 - [x] 6.1 將出拳軌跡定義更新為 `punch_trajectory` version 2，只有 Backend capability 回報 Executor 可執行時才顯示為可使用。
 - [x] 6.2 將既有兩階段錄製元件擴充到出拳軌跡，先顯示面向出拳方向與靜止姿勢說明，再錄製兩秒校正；校正前不顯示正式錄製時間。
 - [x] 6.3 校正完成後才開放 5 至 3600 秒時間輸入與「開始正式測量」，並將有效 `calibration_end_elapsed_us` 與 `measurement_start_elapsed_us` 寫入 Analysis Parameters。
-- [x] 6.4 實作校正期間來源中斷、校正失敗、正式錄製來源中斷及 Backend 安全錯誤的 UI 狀態與重新檢測／重新測量操作。
+- [x] 6.4 實作校正期間來源中斷、校正不穩定 warning、無法運算的校正失敗、正式錄製來源中斷及 Backend 安全錯誤的 UI 狀態與重新檢測／重新測量操作。
 - [x] 6.5 新增 Desktop Scenario tests，驗證可用／待開發狀態、校正前後轉場、時間輸入、Session Parameters、中斷處理及無出拳 Result 說明。
 - [x] 6.6 將校正結束與正式錄製開始拆成兩個時間邊界，驗證 user 在兩者之間移動不會造成校正失敗或被算成正式出拳。
 
@@ -57,7 +57,7 @@
 - [x] 7.2 實作手別與拳次 selector，首次顯示時選取時間最早的一拳；切換時只更新本機 Result view，不重新呼叫 Backend。
 - [x] 7.3 實作滑鼠旋轉、縮放、平移，以及可用鍵盤觸發的使用者、側面、上方與重設縮放 Camera presets。
 - [x] 7.4 實作預設使用者視角：Camera 位於 user 身後朝 `+Y` 觀看，`+Z` 保持向上，並依所選軌跡自動計算可完整看見的距離。
-- [x] 7.5 顯示所選軌跡的手別、拳次、持續時間、路徑長度與最大位移，並在 Result view 保留「重新測量」。
+- [x] 7.5 顯示所選軌跡的手別、拳次、持續時間、路徑長度、最大位移與校正品質 warning，並在 Result view 保留「重新測量」。
 - [x] 7.6 實作 Matplotlib／3D Widget 建立失敗的文字 Fallback，保留 Result 摘要與重新測量且不得讓 App 閃退。
 - [x] 7.7 新增 UI Scenario tests，驗證 selector、Camera presets、Result 不被 Camera 操作修改、fallback、鍵盤焦點、`900 × 650` 視窗與高 DPI／捲動配置。
 - [x] 7.8 將 pyqtgraph／PyOpenGL 圖改為內嵌 Matplotlib 3D 圖，保留手別、拳次、Camera presets、摘要與重新測量，並移除不再使用的繪圖相依套件。

@@ -159,6 +159,17 @@ class TrajectoryResultView(QWidget):
         counts.setWordWrap(True)
         layout.addWidget(counts)
 
+        warnings = list(self.result.get("warnings", ()))
+        quality = QLabel("資料品質：需要注意" if warnings else "資料品質：有效")
+        quality.setObjectName("warningMessage" if warnings else "statusChip")
+        quality.setWordWrap(True)
+        layout.addWidget(quality)
+        for warning in warnings:
+            warning_label = QLabel(f"• {warning}")
+            warning_label.setObjectName("warningMessage")
+            warning_label.setWordWrap(True)
+            layout.addWidget(warning_label)
+
         if not self._trajectories:
             empty = QLabel("本次測量沒有偵測到可顯示的出拳軌跡。")
             empty.setWordWrap(True)

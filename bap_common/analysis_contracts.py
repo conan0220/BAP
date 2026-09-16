@@ -435,6 +435,14 @@ def _validate_punch_trajectory_result(result: dict[str, Any]) -> None:
         raise ContractError("invalid_result_value", "出拳軌跡座標系統不正確")
     if result["distance_unit"] != "m":
         raise ContractError("invalid_result_value", "出拳軌跡距離單位必須是公尺")
+    warnings = result["warnings"]
+    if any(not isinstance(item, str) or not item.strip() for item in warnings):
+        raise ContractError("invalid_result_value", "軌跡品質警告必須是非空白文字")
+    quality = result["quality_status"]
+    if quality not in {"valid", "warning"}:
+        raise ContractError("invalid_result_value", "軌跡品質狀態不正確")
+    if (quality == "valid" and warnings) or (quality == "warning" and not warnings):
+        raise ContractError("invalid_result_value", "軌跡品質狀態與 warnings 不一致")
 
     counts = {
         "left": result["left_punch_count"],
@@ -594,6 +602,8 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
                 ResultFieldSpecification(name="left_punch_count", value_type=ResultValueType.INTEGER),
                 ResultFieldSpecification(name="right_punch_count", value_type=ResultValueType.INTEGER),
                 ResultFieldSpecification(name="total_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="quality_status", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="warnings", value_type=ResultValueType.ARRAY),
                 ResultFieldSpecification(name="trajectories", value_type=ResultValueType.ARRAY),
             ),
         ),

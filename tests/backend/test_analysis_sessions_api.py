@@ -589,12 +589,14 @@ def test_trajectory_failure_keeps_csv_and_retry_reuses_saved_inputs(tmp_path):
             def execute(self, *, inputs, parameters):
                 assert len(inputs) == 2
                 return {
-                    "algorithm_version": "trajectory_rule_v1",
+                    "algorithm_version": "trajectory_rule_v2",
                     "coordinate_system": "session_local_x_right_y_forward_z_up",
                     "distance_unit": "m",
                     "left_punch_count": 0,
                     "right_punch_count": 0,
                     "total_punch_count": 0,
+                    "quality_status": "valid",
+                    "warnings": [],
                     "trajectories": [],
                 }
 
@@ -617,12 +619,14 @@ def test_trajectory_result_with_three_hundred_points_round_trips_database(tmp_pa
     class MaximumTrajectoryExecutor:
         def execute(self, *, inputs, parameters):
             return {
-                "algorithm_version": "trajectory_rule_v1",
+                "algorithm_version": "trajectory_rule_v2",
                 "coordinate_system": "session_local_x_right_y_forward_z_up",
                 "distance_unit": "m",
                 "left_punch_count": 1,
                 "right_punch_count": 0,
                 "total_punch_count": 1,
+                "quality_status": "valid",
+                "warnings": [],
                 "trajectories": [{
                     "hand": "left",
                     "punch_index": 1,

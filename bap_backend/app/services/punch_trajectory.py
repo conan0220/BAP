@@ -20,9 +20,28 @@ from bap_backend.app.services.imu_motion import (
 from bap_common.analysis_contracts import ContractError
 
 
-ALGORITHM_VERSION = "trajectory_rule_v1"
+ALGORITHM_VERSION = "trajectory_rule_v2"
 COORDINATE_SYSTEM = "session_local_x_right_y_forward_z_up"
 MAXIMUM_DISPLAY_POINTS = 300
+UNSTABLE_CALIBRATION_WARNING = (
+    "校正期間偵測到明顯動作，本次軌跡仍已產生，但方向或位置漂移可能較大。"
+)
+
+
+def _calibration_heading_with_warning(
+    samples: tuple[MotionImuSample, ...], calibration_end_index: int
+) -> tuple[float, bool]:
+    """Return a usable heading while reporting unstable calibration as quality."""
+
+    try:
+        return calibration_heading(samples, calibration_end_index), False
+    except ImuMotionDataError as error:
+        if error.code != "unstable_calibration":
+            raise
+        # CSV parsing already proved that this sample has a finite, normalizable
+        # Quaternion.  It is a deterministic best-effort fallback, not a claim
+        # that the calibration was stable.
+        return calibration_heading(samples[:1], 1), True
 
 
 def integrate_window_positions(
@@ -140,10 +159,27 @@ class PunchTrajectoryExecutor:
             right_calibration_end, right_start = calibration_and_measurement_indices(
                 right_samples, calibration_end, measurement_start
             )
-            heading = validate_paired_headings(
-                calibration_heading(left_samples, left_calibration_end),
-                calibration_heading(right_samples, right_calibration_end),
+            left_heading, left_unstable = _calibration_heading_with_warning(
+                left_samples, left_calibration_end
             )
+            right_heading, right_unstable = _calibration_heading_with_warning(
+                right_samples, right_calibration_end
+            )
+            warnings: list[str] = []
+            if left_unstable or right_unstable:
+                warnings.append(UNSTABLE_CALIBRATION_WARNING)
+            try:
+                heading = validate_paired_headings(left_heading, right_heading)
+            except ImuMotionDataError as error:
+                if error.code != "inconsistent_heading" or not warnings:
+                    raise
+                # An unstable calibration can also make the two fallback
+                # headings disagree.  Keep a deterministic left-wrist frame
+                # and surface the lower confidence instead of stopping.
+                heading = left_heading
+                warnings.append(
+                    "校正不穩定且左右手方向不一致，本次使用左手腕方向作為參考。"
+                )
             left = analyze_single_wrist_trajectories(
                 left_samples,
                 left_start,
@@ -168,5 +204,7 @@ class PunchTrajectoryExecutor:
             "left_punch_count": len(left),
             "right_punch_count": len(right),
             "total_punch_count": len(trajectories),
+            "quality_status": "warning" if warnings else "valid",
+            "warnings": warnings,
             "trajectories": trajectories,
         }
