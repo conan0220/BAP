@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QLabel
 from bap_desktop.services.imu_discovery import DiscoveryResult, ImuSource
 from bap_desktop.services.imu_scan import ConnectionType
 from bap_desktop.ui.punch_items.page import PunchItemPage
-from bap_desktop.ui.punch_items.force_view import ForceResultView
+from bap_desktop.ui.punch_items.force_view import ForceResultView, MatplotlibForceCanvas
 
 
 class Discovery:
@@ -127,6 +127,25 @@ def test_force_result_shows_units_quality_warnings_and_embedded_fallback(qtbot) 
     assert "不是 Force Plate" in visible
     assert "實際取樣率低於建議值" in visible
     assert hasattr(view, "fallback_label")
+
+
+@pytest.mark.scenario("punch-force-analysis", "user 查看正常 Result")
+def test_force_chart_uses_english_visible_text(qtbot) -> None:
+    canvas = MatplotlibForceCanvas(result())
+    qtbot.addWidget(canvas.widget)
+    axes = canvas.figure.axes
+    assert [axis.get_ylabel() for axis in axes] == [
+        "Acceleration (m/s²)",
+        "Angular acceleration (rad/s²)",
+        "Force (kgf)",
+    ]
+    assert axes[2].get_xlabel() == "Measurement elapsed time (s)"
+    assert [text.get_text() for text in axes[0].get_legend().get_texts()] == ["Bag top", "Bag bottom"]
+    assert [text.get_text() for text in axes[1].get_legend().get_texts()] == ["X", "Y"]
+    assert [text.get_text() for text in axes[2].get_legend().get_texts()] == [
+        "Estimated force",
+        "Global maximum",
+    ]
 
 
 @pytest.mark.scenario("desktop-app-shell", "完成待開發項目的 IMU 來源選擇")

@@ -38,6 +38,7 @@ def trajectory_csv(
     calibration_quaternion: tuple[object, object, object, object] | None = None,
     gap_quaternion: tuple[object, object, object, object] | None = None,
     missing_quaternion: bool = False,
+    unstable_calibration: bool = False,
 ) -> bytes:
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
@@ -54,6 +55,8 @@ def trajectory_csv(
         current_quaternion = calibration_quaternion if calibration_quaternion is not None and index < 200 else quaternion
         if gap_quaternion is not None and 200 <= index < 240:
             current_quaternion = gap_quaternion
+        if unstable_calibration and index == 100:
+            current_quaternion = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
         if missing_quaternion:
             current_quaternion = ("", "", "", "")
         writer.writerow(
@@ -150,6 +153,19 @@ def test_unstable_calibration_is_rejected() -> None:
     with pytest.raises(ImuMotionDataError) as captured:
         calibration_heading(tuple(samples), start)
     assert captured.value.code == "unstable_calibration"
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "校正期間姿態不穩定")
+def test_executor_returns_warning_instead_of_rejecting_unstable_calibration() -> None:
+    payload = trajectory_csv(unstable_calibration=True)
+    result = PunchTrajectoryExecutor().execute(
+        inputs={"left_wrist": payload, "right_wrist": payload},
+        parameters=PARAMETERS,
+    )
+    assert result["quality_status"] == "warning"
+    assert any("校正期間" in warning for warning in result["warnings"])
+    assert result["total_punch_count"] == 2
+    trajectory_specification().validate_result(result)
 
 
 def test_paired_heading_must_be_consistent() -> None:

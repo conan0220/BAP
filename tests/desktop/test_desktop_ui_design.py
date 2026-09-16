@@ -1023,7 +1023,7 @@ def test_trajectory_completed_result_uses_trajectory_view_and_keeps_restart(
                 session_id="trajectory-session",
                 analysis_id="trajectory-analysis",
                 result={
-                    "algorithm_version": "trajectory_rule_v1",
+                    "algorithm_version": "trajectory_rule_v2",
                     "coordinate_system": "session_local_x_right_y_forward_z_up",
                     "distance_unit": "m",
                     "left_punch_count": 0,

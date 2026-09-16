@@ -57,7 +57,7 @@ def package(*, strikes=(3.0,), sample_rate=400, missing_top=frozenset()):
     )
     now = datetime.now(timezone.utc)
     metadata = SessionMetadata(
-        session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.23",
+        session_id=uuid4(), metadata_schema_version=2, desktop_version="0.1.25",
         started_at=now, ended_at=now, requested_duration_seconds=5,
         actual_duration_seconds=4.2, stop_reason=SessionStopReason.ENDED_BY_USER,
         csv_files=tuple(descriptors), analyses=(job,),

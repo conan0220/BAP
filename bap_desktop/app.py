@@ -503,12 +503,14 @@ def main() -> int:
         from bap_desktop.ui.punch_items.trajectory_view import TrajectoryResultView
 
         trajectory_result = {
-            "algorithm_version": "trajectory_rule_v1",
+            "algorithm_version": "trajectory_rule_v2",
             "coordinate_system": "session_local_x_right_y_forward_z_up",
             "distance_unit": "m",
             "left_punch_count": 1,
             "right_punch_count": 0,
             "total_punch_count": 1,
+            "quality_status": "valid",
+            "warnings": [],
             "trajectories": [{
                 "hand": "left", "punch_index": 1,
                 "start_elapsed_us": 2_000_000, "end_elapsed_us": 2_100_000,

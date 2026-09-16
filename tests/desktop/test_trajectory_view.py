@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 from bap_desktop.ui.punch_items.trajectory_view import (
     MatplotlibTrajectoryCanvas,
@@ -35,12 +35,14 @@ def result() -> dict:
         trajectory("left", 2, 3_000_000, 2.0),
     ]
     return {
-        "algorithm_version": "trajectory_rule_v1",
+        "algorithm_version": "trajectory_rule_v2",
         "coordinate_system": "session_local_x_right_y_forward_z_up",
         "distance_unit": "m",
         "left_punch_count": 2,
         "right_punch_count": 1,
         "total_punch_count": 3,
+        "quality_status": "valid",
+        "warnings": [],
         "trajectories": trajectories,
     }
 
@@ -81,6 +83,20 @@ def test_view_selects_earliest_punch_and_switches_locally(qtbot) -> None:
     assert "第 2 拳" in view.summary.text()
     assert canvas.shown[-1]["punch_index"] == 2
     assert source == original
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "校正期間姿態不穩定")
+def test_view_shows_calibration_warning_without_hiding_trajectory(qtbot) -> None:
+    payload = result()
+    payload["quality_status"] = "warning"
+    payload["warnings"] = ["校正期間偵測到明顯動作，本次軌跡可能有較大漂移。"]
+    canvas = FakeCanvas()
+    view = TrajectoryResultView(payload, canvas_factory=lambda: canvas)
+    qtbot.addWidget(view)
+    visible = " ".join(label.text() for label in view.findChildren(QLabel))
+    assert "資料品質：需要注意" in visible
+    assert "校正期間偵測到明顯動作" in visible
+    assert canvas.shown
 
 
 @pytest.mark.scenario("punch-trajectory-analysis", "user 操作 3D 圖")
