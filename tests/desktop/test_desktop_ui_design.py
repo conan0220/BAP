@@ -625,11 +625,10 @@ def test_start_measurement_shows_elapsed_time_and_stop_action(qtbot, tmp_path: P
 
 @pytest.mark.scenario("punch-speed-analysis", "正式測量前先做兩秒靜止校正")
 @pytest.mark.scenario("punch-speed-analysis", "user 完成靜止校正")
-@pytest.mark.scenario("punch-trajectory-analysis", "校正完成後開始正式測量")
-@pytest.mark.parametrize("item_name", ("拳頭速度", "出拳軌跡"))
 def test_two_stage_analysis_calibrates_before_formal_measurement(
-    qtbot, tmp_path: Path, item_name: str
+    qtbot, tmp_path: Path
 ) -> None:
+    item_name = "拳頭速度"
     class Recording:
         def __init__(self, *_args, **kwargs):
             self.kwargs = kwargs
@@ -706,20 +705,15 @@ def test_two_stage_analysis_calibrates_before_formal_measurement(
     page.shutdown()
 
 
-@pytest.mark.scenario("punch-trajectory-analysis", "user 準備校正")
-@pytest.mark.parametrize(
-    "item_name,analysis_type", (("拳頭速度", "punch_speed"), ("出拳軌跡", "punch_trajectory"))
-)
-def test_two_stage_ready_state_explains_calibration_and_manual_next_step(
-    qtbot, item_name: str, analysis_type: str
-) -> None:
+@pytest.mark.scenario("punch-speed-analysis", "user 準備校正")
+def test_two_stage_ready_state_explains_calibration_and_manual_next_step(qtbot) -> None:
     speed_specification = next(
         specification
         for specification in builtin_analysis_specifications()
-        if specification.analysis_type == analysis_type
+        if specification.analysis_type == "punch_speed"
         and specification.spec_version == 2
     )
-    page = make_punch_page(qtbot, item_name)
+    page = make_punch_page(qtbot, "拳頭速度")
     page._capability_ready(AnalysisCapability(speed_specification, True))
 
     assert "面向預計出拳的方向" in page.status.text()
@@ -727,6 +721,22 @@ def test_two_stage_ready_state_explains_calibration_and_manual_next_step(
     assert "校正完成後" in page.status.text()
     assert page.continue_button.text() == "開始校正"
     assert page.duration_row.isHidden()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "直接顯示正式錄製設定")
+def test_trajectory_ready_state_skips_calibration(qtbot) -> None:
+    specification = next(
+        item
+        for item in builtin_analysis_specifications()
+        if item.analysis_type == "punch_trajectory" and item.spec_version == 3
+    )
+    page = make_punch_page(qtbot, "出拳軌跡")
+    page._capability_ready(AnalysisCapability(specification, True))
+
+    assert "開始測量" in page.status.text()
+    assert "校正" not in page.status.text()
+    assert page.continue_button.text() == "開始測量"
+    assert not page.duration_row.isHidden()
 
 
 @pytest.mark.scenario("punch-speed-analysis", "校正完成後輸入無效的正式錄製時間")
@@ -755,11 +765,8 @@ def test_punch_speed_rejects_invalid_duration_after_calibration(qtbot, value: st
 
 
 @pytest.mark.scenario("punch-speed-analysis", "校正期間必要 IMU 中斷")
-@pytest.mark.scenario("punch-trajectory-analysis", "校正期間 IMU 中斷")
-@pytest.mark.parametrize("item_name", ("拳頭速度", "出拳軌跡"))
-def test_two_stage_calibration_interruption_returns_to_retry_state(
-    qtbot, item_name: str
-) -> None:
+def test_two_stage_calibration_interruption_returns_to_retry_state(qtbot) -> None:
+    item_name = "拳頭速度"
     from bap_common.analysis_session import SessionStopReason
 
     class Recording:

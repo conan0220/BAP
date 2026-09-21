@@ -27,6 +27,7 @@ PARAMETERS = {
     "calibration_end_elapsed_us": BOUNDARY_US,
     "measurement_start_elapsed_us": BOUNDARY_US,
 }
+DIRECT_PARAMETERS = {"measurement_start_elapsed_us": 1}
 
 
 def trajectory_csv(
@@ -75,6 +76,62 @@ def trajectory_specification():
         item for item in builtin_analysis_specifications()
         if item.analysis_type == "punch_trajectory" and item.spec_version == 2
     )
+
+
+def direct_trajectory_specification():
+    return next(
+        item for item in builtin_analysis_specifications()
+        if item.analysis_type == "punch_trajectory" and item.spec_version == 3
+    )
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "直接錄製，不需要校正")
+def test_direct_recording_returns_contract_valid_trajectories() -> None:
+    payload = trajectory_csv(event_centers=(60, 120), rows=200)
+    result = PunchTrajectoryExecutor().execute(
+        inputs={"left_wrist": payload, "right_wrist": payload},
+        parameters=DIRECT_PARAMETERS,
+    )
+
+    assert result["algorithm_version"] == "trajectory_direct_v1"
+    assert result["total_punch_count"] == 4
+    assert result["quality_status"] == "valid"
+    direct_trajectory_specification().validate_result(result)
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "初始方向不同不阻擋分析")
+def test_direct_recording_turns_inconsistent_initial_direction_into_warning() -> None:
+    quarter_turn = (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+    result = PunchTrajectoryExecutor().execute(
+        inputs={
+            "left_wrist": trajectory_csv(event_centers=(60,), rows=150),
+            "right_wrist": trajectory_csv(
+                event_centers=(60,), rows=150, quaternion=quarter_turn
+            ),
+        },
+        parameters=DIRECT_PARAMETERS,
+    )
+
+    assert result["quality_status"] == "warning"
+    assert any("初始方向不同" in warning for warning in result["warnings"])
+    assert result["total_punch_count"] == 2
+    direct_trajectory_specification().validate_result(result)
+
+
+@pytest.mark.scenario("analysis-specification-contract", "version 3 收到校正參數")
+def test_version_three_requires_only_measurement_start_boundary() -> None:
+    specification = direct_trajectory_specification()
+    specification.validate_parameters(DIRECT_PARAMETERS)
+
+    with pytest.raises(ContractError) as captured:
+        specification.validate_parameters(
+            {
+                "calibration_end_elapsed_us": 1,
+                "measurement_start_elapsed_us": 1,
+            }
+        )
+
+    assert captured.value.code == "unknown_parameter"
 
 
 @pytest.mark.scenario("punch-trajectory-analysis", "一場 Session 包含左右手多拳")

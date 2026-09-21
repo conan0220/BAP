@@ -357,7 +357,7 @@ class LiveAnalysisRecording:
         self.spec_version = spec_version
         self.analysis_parameters = dict(analysis_parameters or {})
         two_stage = (
-            (analysis_type in {"punch_speed", "punch_trajectory"} and spec_version == 2)
+            (analysis_type == "punch_speed" and spec_version == 2)
             or (analysis_type == "punch_force" and spec_version == 1)
         )
         self.calibration_seconds = 2.0 if two_stage else 0.0
@@ -436,6 +436,8 @@ class LiveAnalysisRecording:
                     "measurement_start_elapsed_us": self._measurement_start_elapsed_us,
                 }
             )
+        elif self.analysis_type == "punch_trajectory" and self.spec_version == 3:
+            parameters["measurement_start_elapsed_us"] = self._measurement_start_elapsed_us
         self.job = build_analysis_request(
             analysis_type=self.analysis_type,
             spec_version=self.spec_version,
