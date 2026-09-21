@@ -486,7 +486,7 @@ class PunchItemPage(QWidget):
         self._clear_source_selectors()
         self.installation_confirmation.setVisible(False)
         self.message.setVisible(False)
-        if self.definition.analysis_type in {"punch_speed", "punch_trajectory"}:
+        if self.definition.analysis_type == "punch_speed":
             self.status.setText(
                 "下一步：面向預計出拳的方向，將雙手自然放下並保持不動，"
                 "再按「開始校正」。"
@@ -504,13 +504,13 @@ class PunchItemPage(QWidget):
         self._measurement_state = "ready"
         self.continue_button.setText(
             "開始校正"
-            if self.definition.analysis_type in {"punch_speed", "punch_trajectory", "punch_force"}
+            if self.definition.analysis_type in {"punch_speed", "punch_force"}
             else "開始測量"
         )
         self.continue_button.setEnabled(True)
         self.retry_button.setVisible(False)
         self.duration_row.setVisible(
-            self.definition.analysis_type not in {"punch_speed", "punch_trajectory", "punch_force"}
+            self.definition.analysis_type not in {"punch_speed", "punch_force"}
         )
         self.timer_details.setVisible(False)
         self.service.clear()
@@ -536,7 +536,7 @@ class PunchItemPage(QWidget):
         if self.recording_root is None:
             self._show_error("本機 Session 暫存位置尚未設定")
             return
-        if self.definition.analysis_type in {"punch_speed", "punch_trajectory", "punch_force"}:
+        if self.definition.analysis_type in {"punch_speed", "punch_force"}:
             # 校正尚未完成時不要求 user 決定正式錄製時間。這個值只用來建立
             # 暫存錄製物件，正式時間會在 user 按下「開始正式錄製」時覆寫。
             requested_duration = 60

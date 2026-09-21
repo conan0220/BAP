@@ -16,7 +16,7 @@
 
 這份研究內容證明了軌跡重建方向可行，但目前具有固定路徑、固定長度陣列、裝置專屬校正值、來源不明 EXE、整段資料連續積分及第三方 Fusion 授權未確認等限制，不能直接放進 Backend Artifact。
 
-BAP 已有 Common IMU CSV、左右手腕 Session、Quaternion 旋轉、靜止校正、出拳區段及速度積分。出拳軌跡適合在現有 `punch_speed` 基礎上抽出共用 Motion pipeline，再增加逐拳位置積分與 3D Result view。需求細節見本 Change 的 delta specs。
+BAP 已有 Common IMU CSV、左右手腕 Session、Quaternion 旋轉、出拳區段及速度積分。出拳軌跡適合在現有 `punch_speed` 基礎上抽出共用 Motion pipeline，再增加逐拳位置積分與 3D Result view。需求細節見本 Change 的 delta specs。
 
 ## Goals / Non-Goals
 
@@ -24,7 +24,7 @@ BAP 已有 Common IMU CSV、左右手腕 Session、Quaternion 旋轉、靜止校
 
 - 以同一套可測試的 Python 運算支援左右手腕每一拳的相對三維軌跡。
 - 保留 `kaipo_research` 的姿態轉換、重力移除與兩次積分核心概念，同時移除裝置專屬硬編碼。
-- 讓 `punch_speed` 與 `punch_trajectory` 共用 CSV、時間軸、Quaternion、校正與 Punch window 邏輯，避免兩份實作逐漸不一致。
+- 讓 `punch_speed` 與 `punch_trajectory` 共用 CSV、時間軸、Quaternion、初始參考與 Punch window 邏輯，避免兩份實作逐漸不一致。
 - 讓 Desktop 以內嵌 Matplotlib 互動式 3D 圖呈現有限大小的 Result，且在繪圖環境不可用時安全降級。
 - 不改動現有 Session API 與 Database tables。
 
@@ -43,12 +43,11 @@ flowchart LR
     USER[user] --> UI[Desktop 出拳軌跡頁]
     UI --> DISCOVERY[三秒 IMU 探索]
     DISCOVERY --> ASSIGN[分配左右手腕 IMU]
-    ASSIGN --> CAL[兩秒靜止校正]
-    CAL --> RECORD[正式錄製]
+    ASSIGN --> RECORD[直接正式錄製]
     RECORD --> CSV[兩份 Common IMU CSV]
     CSV --> API[Analysis Session API]
     API --> DB[(SQLite CSV BLOB)]
-    API --> JOB[punch_trajectory v2 Job]
+    API --> JOB[punch_trajectory v3 Job]
     JOB --> MOTION[Motion pipeline]
     MOTION --> RESULT[逐拳 Trajectory Result JSON]
     RESULT --> DB
@@ -104,21 +103,17 @@ flowchart LR
 
 速度修正使用與拳頭速度一致的線性終點誤差移除。位置不強迫最後一點回到原點，避免把沒有完整收拳的有效位移抹除；每個新 Punch window 重新以零速度與零位置開始。
 
-### 4. 校正資料同時定義偏移與 Session heading
+### 4. version 3 直接錄製，初始資料只作為內部計算參考
 
-Desktop 將 `punch_trajectory` version 2 納入和拳頭速度相同的兩階段錄製：先錄兩秒校正，再由 user 決定正式時間及開始正式測量。`calibration_end_elapsed_us` 固定校正資料的結束位置，`measurement_start_elapsed_us` 標示正式測量開始位置；中間等待 user 輸入時間、操作滑鼠或移動到準備姿勢的資料不參與校正穩定性判斷，也不算正式出拳。兩個階段仍保存在同一份 CSV，不另外建立第三份校正檔。
+Desktop 將 `punch_trajectory` version 3 改為單階段流程。user 完成左右手腕 IMU 分配後，直接輸入正式錄製時間並按「開始測量」；畫面不再顯示「開始校正」、兩秒倒數或校正失敗狀態。Metadata 只保存 `measurement_start_elapsed_us`，不再保存 `calibration_end_elapsed_us`。
 
-Prototype 假設左右手腕 IMU 依 UI 示意以一致方向安裝。user 校正時面向預計出拳方向並保持準備姿勢；Backend 以校正 Quaternion 的穩定代表值建立 Session heading，將地球座標轉成：
+Backend 仍需要一個有限的數值基準來移除初始加速度偏移並建立顯示方向，因此使用正式錄製開頭的有效資料作為 deterministic reference。這是演算法內部計算，不是獨立錄製階段，也不要求 user 靜止或等待。若左右手初始 heading 差異過大，Executor 使用左手腕方向繼續運算並回傳 warning，不阻擋分析。
 
-- `+X`：user 右方。
-- `+Y`：user 正前方。
-- `+Z`：向上。
-
-若校正 Quaternion 變動過大，但資料仍可正規化及運算，Executor 使用第一筆有效姿態作為 deterministic fallback，完成分析並以 `quality_status = warning` 和 `warnings` 說明方向或位置漂移可能較大。若不穩定造成左右 heading 不一致，則以左手腕方向作為本次參考並增加警告。只有 Quaternion 無法正規化、校正或正式資料不足、時間軸無法使用等輸入本身不能運算的情況才讓 Job 失敗。
+此取捨降低操作摩擦與「方向不一致」造成的失敗，但也會增加方向及 Drift 不確定性。UI 必須維持「相對估算軌跡」說明，不得宣稱為精密絕對位置。
 
 ### 5. 使用版本化、可重新驗證的 Result JSON
 
-`bap_common/analysis_contracts.py` 新增 `punch_trajectory` version 2 specification 與關聯驗證：
+`bap_common/analysis_contracts.py` 新增 `punch_trajectory` version 3 specification 與關聯驗證：
 
 ```text
 algorithm_version
@@ -167,20 +162,20 @@ Backend Result 仍視為成功且不會被刪除。這使顯示能力問題不�
 
 ### 8. 沿用現有 Session API 與 Database
 
-現有 `analysis_jobs`、`analysis_input_bindings` 與 `analysis_results.result_json` 已能保存新分析，不需要 Migration。Backend capability endpoint 會在 Trajectory Executor 成功註冊時回報 `punch_trajectory` version 2 可執行；Desktop 仍依 capability 決定是否開放正式錄製。
+現有 `analysis_jobs`、`analysis_input_bindings` 與 `analysis_results.result_json` 已能保存新分析，不需要 Migration。Backend capability endpoint 會在 Trajectory Executor 成功註冊時回報 `punch_trajectory` version 3 可執行；Desktop 仍依 capability 決定是否開放正式錄製。
 
 ## 建議程式結構
 
 ```text
 BAP/
 ├─ bap_common/
-│  └─ analysis_contracts.py            # punch_trajectory v2 契約
+│  └─ analysis_contracts.py            # punch_trajectory v3 契約
 ├─ bap_backend/app/services/
 │  ├─ imu_motion.py                    # 共用運動資料與積分
 │  ├─ punch_speed.py                   # 改用共用運算，維持既有結果
 │  └─ punch_trajectory.py              # 逐拳位置與 Result
 ├─ bap_desktop/ui/punch_items/
-│  ├─ definitions.py                   # trajectory spec_version=2
+│  ├─ definitions.py                   # trajectory spec_version=3
 │  ├─ page.py                          # 校正、正式錄製與 Result 轉場
 │  └─ trajectory_view.py               # selector、3D adapter、fallback
 └─ tests/
@@ -219,8 +214,8 @@ flowchart TD
 
 ## Migration Plan
 
-1. 先加入 version 2 契約、Backend Motion pipeline 與 Trajectory Executor；version 1 placeholder 保留但不可執行。
-2. Backend 部署後 capability endpoint 會回報 version 2 可執行，但舊 Desktop 只認得 version 1，因此不會誤解新 Result。
+1. 先加入 version 3 契約、Backend Motion pipeline 與 Trajectory Executor；version 1 placeholder 保留但不可執行。
+2. Backend 部署後 capability endpoint 會回報 version 3 可執行，但舊 Desktop 只認得 version 1，因此不會誤解新 Result。
 3. Desktop 提升版本並加入校正與 3D Result view，通過 PR CI 與 Windows Artifact E2E 後才發布。
-4. user 更新 Desktop 後才能提交 version 2 Session。
-5. 若 Backend 部署失敗，沿用既有 Backend rollback；若 Desktop 3D 顯示有問題，可回復上一個 Desktop Release，Backend 保留 version 2 不影響其他分析。
+4. user 更新 Desktop 後才能提交 version 3 Session。
+5. 若 Backend 部署失敗，沿用既有 Backend rollback；若 Desktop 3D 顯示有問題，可回復上一個 Desktop Release，Backend 保留 version 3 不影響其他分析。

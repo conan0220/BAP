@@ -43,6 +43,7 @@ def create_default_analysis_registry() -> AnalysisRegistry:
     registry.register_executor("punch_force", 1, PunchForceExecutor())
     registry.register_executor("punch_speed", 2, PunchSpeedExecutor())
     registry.register_executor("punch_trajectory", 2, PunchTrajectoryExecutor())
+    registry.register_executor("punch_trajectory", 3, PunchTrajectoryExecutor())
     try:
         bundle = PunchClassificationModelBundle(default_model_bundle_path())
     except PunchClassificationBundleError:

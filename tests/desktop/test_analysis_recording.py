@@ -425,11 +425,10 @@ def test_live_recording_preserves_partial_wireless_data_with_source_reason(tmp_p
 
 @pytest.mark.scenario("punch-speed-analysis", "校正資料與正式測量共用同一組 CSV")
 @pytest.mark.scenario("punch-speed-analysis", "正式測量時間不包含校正時間")
-@pytest.mark.scenario("punch-trajectory-analysis", "校正完成後開始正式測量")
-@pytest.mark.parametrize("analysis_type", ("punch_speed", "punch_trajectory"))
 def test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters(
-    tmp_path: Path, analysis_type: str
+    tmp_path: Path
 ):
+    analysis_type = "punch_speed"
     class Clock:
         value = 10.0
 
@@ -513,6 +512,46 @@ def test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters(
         "calibration_end_elapsed_us": 2_000_000,
         "measurement_start_elapsed_us": 5_000_000,
     }
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "直接開始正式錄製")
+def test_trajectory_version_three_starts_without_calibration(tmp_path: Path) -> None:
+    class FakeCapture:
+        def __init__(self, root, *, assignments, monotonic, **_kwargs):
+            self.sources = tuple(assignments.values())
+            self.session_id = uuid4()
+            self.directory = Path(root) / str(self.session_id)
+            self.csv_ids = {source_id(source): uuid4() for source in self.sources}
+            self.started_monotonic = monotonic()
+
+        def start(self):
+            self.directory.mkdir(parents=True)
+
+        def interrupted_sources(self, *, now=None):
+            return ()
+
+        def discard(self):
+            pass
+
+    recording = LiveAnalysisRecording(
+        tmp_path,
+        assignments={
+            "left_wrist": ImuSource("COM5", ConnectionType.WIRED),
+            "right_wrist": ImuSource("COM6", ConnectionType.WIRED),
+        },
+        analysis_type="punch_trajectory",
+        spec_version=3,
+        desktop_version="0.1.26",
+        requested_duration_seconds=10,
+        monotonic=lambda: 10.0,
+        capture_factory=FakeCapture,
+    )
+
+    recording.start()
+
+    assert not recording.is_calibrating
+    assert recording.elapsed_seconds() == 0
+    assert recording.job.parameters == {"measurement_start_elapsed_us": 1}
 
 
 @pytest.mark.scenario("common-imu-csv", "Session 使用不同 Port 的兩顆有線 IMU")

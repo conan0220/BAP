@@ -156,11 +156,20 @@ def build_punch_speed_package(
 
 
 def build_punch_trajectory_package(
-    *, valid_quaternion: bool = True
+    *, valid_quaternion: bool = True, spec_version: int = 2
 ) -> tuple[SessionMetadata, dict[str, bytes]]:
     metadata, contents = build_punch_speed_package(valid_quaternion=valid_quaternion)
+    parameters = (
+        {"measurement_start_elapsed_us": 1}
+        if spec_version == 3
+        else metadata.analyses[0].parameters
+    )
     job = metadata.analyses[0].model_copy(
-        update={"analysis_type": "punch_trajectory", "spec_version": 2}
+        update={
+            "analysis_type": "punch_trajectory",
+            "spec_version": spec_version,
+            "parameters": parameters,
+        }
     )
     return metadata.model_copy(update={"analyses": (job,)}), contents
 
@@ -538,13 +547,13 @@ def test_real_punch_speed_executor_completes_over_http(tmp_path):
 
 
 @pytest.mark.scenario("punch-trajectory-analysis", "Backend 回傳一拳的有效軌跡")
-@pytest.mark.scenario("punch-trajectory-analysis", "Backend 回傳一拳的有效軌跡")
-def test_real_punch_trajectory_executor_completes_over_http_and_preserves_csv(tmp_path):
+@pytest.mark.scenario("punch-trajectory-analysis", "user 開始出拳軌跡測量")
+def test_real_punch_trajectory_v3_executor_completes_over_http_and_preserves_csv(tmp_path):
     client, factory, engine = make_context(tmp_path, with_executor=False)
     client.app.state.analysis_registry.register_executor(
-        "punch_trajectory", 2, PunchTrajectoryExecutor()
+        "punch_trajectory", 3, PunchTrajectoryExecutor()
     )
-    metadata, contents = build_punch_trajectory_package()
+    metadata, contents = build_punch_trajectory_package(spec_version=3)
     original_hashes = {name: inspect_common_imu_csv_bytes(data).sha256 for name, data in contents.items()}
     with client:
         headers = authenticated(client)

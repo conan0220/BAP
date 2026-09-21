@@ -173,6 +173,18 @@ class AnalysisSpecification(BaseModel):
                 raise ContractError(
                     "invalid_parameter", "校正結束時間不得晚於正式測量開始時間"
                 )
+        if self.analysis_type == "punch_trajectory" and self.spec_version == 3:
+            if "measurement_start_elapsed_us" not in parameters:
+                raise ContractError("missing_parameter", "缺少正式錄製開始時間")
+            measurement_start = parameters["measurement_start_elapsed_us"]
+            if (
+                isinstance(measurement_start, bool)
+                or not isinstance(measurement_start, int)
+                or measurement_start <= 0
+            ):
+                raise ContractError(
+                    "invalid_parameter", "正式錄製開始時間必須是大於零的整數 microseconds"
+                )
         if self.analysis_type == "punch_force" and self.spec_version == 1:
             required = (
                 "calibration_end_elapsed_us", "measurement_start_elapsed_us",
@@ -227,7 +239,7 @@ class AnalysisSpecification(BaseModel):
             _validate_punch_speed_result(result)
         if self.analysis_type == "punch_classification" and self.spec_version == 2:
             _validate_punch_classification_result(result)
-        if self.analysis_type == "punch_trajectory" and self.spec_version == 2:
+        if self.analysis_type == "punch_trajectory" and self.spec_version in {2, 3}:
             _validate_punch_trajectory_result(result)
         if self.analysis_type == "punch_force" and self.spec_version == 1:
             _validate_punch_force_result(result)
@@ -595,6 +607,24 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
                 "calibration_end_elapsed_us",
                 "measurement_start_elapsed_us",
             ),
+            result_fields=(
+                ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="coordinate_system", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="distance_unit", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="left_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="right_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="total_punch_count", value_type=ResultValueType.INTEGER),
+                ResultFieldSpecification(name="quality_status", value_type=ResultValueType.STRING),
+                ResultFieldSpecification(name="warnings", value_type=ResultValueType.ARRAY),
+                ResultFieldSpecification(name="trajectories", value_type=ResultValueType.ARRAY),
+            ),
+        ),
+        AnalysisSpecification(
+            analysis_type="punch_trajectory",
+            spec_version=3,
+            display_name="出拳軌跡",
+            input_roles=wrist_roles,
+            parameter_names=("measurement_start_elapsed_us",),
             result_fields=(
                 ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),
                 ResultFieldSpecification(name="coordinate_system", value_type=ResultValueType.STRING),

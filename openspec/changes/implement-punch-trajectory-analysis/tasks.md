@@ -71,3 +71,12 @@
 - [ ] 8.5 使用實際左右手腕 IMU 人工驗證 Jab、Hook、Uppercut 與靜止案例，確認預設 user 視角、方向、軌跡形狀、尺度及 Drift，並記錄 Prototype 限制。
 - [ ] 8.6 由 user 在支援的最小視窗與一般螢幕上人工驗證旋轉、縮放、平移、Camera presets、切換手別／拳次與重新測量操作。
 
+
+
+## 9. 移除出拳軌跡校正流程
+
+- [x] 9.1 新增 `punch_trajectory` version 3 契約，只要求 `measurement_start_elapsed_us`，並保留 version 2 讀取舊 Session。
+- [x] 9.2 Desktop 改用 version 3，完成 IMU 分配後直接顯示錄製時間與「開始測量」，不再顯示校正說明或倒數。
+- [x] 9.3 Backend 以正式錄製開頭的有效資料建立內部計算基準；左右手初始方向不同時改為 warning，不阻擋軌跡分析。
+- [x] 9.4 提升 Desktop version 至 `0.1.26`，並新增契約、Backend、錄製服務及 UI Scenario tests。
+- [x] 9.5 執行目標 Source-level tests，確認 version 2 相容性、version 3 直接錄製及其他兩階段分析未回歸。

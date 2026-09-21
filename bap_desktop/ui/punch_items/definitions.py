@@ -51,7 +51,7 @@ PUNCH_ITEM_DEFINITIONS = {
         "punch_trajectory",
         "指定左右手腕 IMU，以互動式 3D 圖查看每一拳的動作路徑。",
         WRIST_PLACEMENTS,
-        spec_version=2,
+        spec_version=3,
     ),
     "拳種辨識": PunchItemDefinition(
         "拳種辨識",
