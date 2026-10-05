@@ -260,11 +260,14 @@ def test_duplicate_assignment_is_rejected_with_text(qtbot) -> None:
 
 
 @pytest.mark.scenario("imu-source-discovery", "可用 IMU 少於項目需求")
-def test_insufficient_sources_are_shown_but_cannot_continue(qtbot) -> None:
-    page = make_punch_page(qtbot, "出拳軌跡", SOURCES[:1])
+@pytest.mark.parametrize("item_name", ("拳頭速度", "出拳次數"))
+def test_insufficient_sources_are_shown_but_cannot_continue(qtbot, item_name) -> None:
+    page = make_punch_page(qtbot, item_name, SOURCES[:1])
 
     assert "不足" in page.message.text()
     assert all(selector.count() == 2 for selector in page._source_selectors)
+    assert not page.continue_button.isEnabled()
+    next(iter(page._source_selectors)).setCurrentIndex(1)
     assert not page.continue_button.isEnabled()
 
 
@@ -737,6 +740,55 @@ def test_trajectory_ready_state_skips_calibration(qtbot) -> None:
     assert "校正" not in page.status.text()
     assert page.continue_button.text() == "開始測量"
     assert not page.duration_row.isHidden()
+
+
+@pytest.mark.parametrize("hand", ("left", "right"))
+def test_single_wrist_assignment_reaches_trajectory_recording_setup(qtbot, hand) -> None:
+    specification = next(
+        item for item in builtin_analysis_specifications()
+        if item.analysis_type == "punch_trajectory" and item.spec_version == 3
+    )
+
+    class Flow:
+        def capability(self, analysis_type, version):
+            assert (analysis_type, version) == ("punch_trajectory", 3)
+            return AnalysisCapability(specification, True)
+
+    page = make_punch_page(qtbot, "出拳軌跡", sources=SOURCES[:1])
+    page.analysis_flow = Flow()
+    selectors = {placement.id: selector for selector, placement in page._source_selectors.items()}
+    assert not page.continue_button.isEnabled()
+    selectors[f"{hand}_wrist"].setCurrentIndex(1)
+    assert page.continue_button.isEnabled()
+    assert page.message.isHidden()
+    assert page.assignments == {f"{hand}_wrist": SOURCES[0]}
+    other = "right" if hand == "left" else "left"
+    selectors[f"{other}_wrist"].setCurrentIndex(1)
+    assert not page.continue_button.isEnabled()
+    selectors[f"{other}_wrist"].setCurrentIndex(0)
+    assert selectors[f"{other}_wrist"].currentText() == "未配戴"
+    page.continue_button.click()
+    qtbot.waitUntil(lambda: page._measurement_state == "ready")
+    assert page.continue_button.text() == "開始測量"
+    assert page.assignments == {f"{hand}_wrist": SOURCES[0]}
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "Older backend requires both wrists")
+def test_single_wrist_detects_older_backend_before_recording(qtbot) -> None:
+    specification = next(
+        item for item in builtin_analysis_specifications()
+        if item.analysis_type == "punch_trajectory" and item.spec_version == 3
+    )
+    legacy = specification.model_copy(update={
+        "input_roles": tuple(role.model_copy(update={"required": True}) for role in specification.input_roles),
+    })
+    page = make_punch_page(qtbot, "出拳軌跡", sources=SOURCES[:1])
+    next(iter(page._source_selectors)).setCurrentIndex(1)
+    page.continue_button.setEnabled(False)
+    page._capability_ready(AnalysisCapability(legacy, True))
+    assert "Backend 尚未支援單側" in page.status.text()
+    assert page._measurement_state == "assigning"
+    assert not page.retry_button.isHidden()
 
 
 @pytest.mark.scenario("punch-speed-analysis", "校正完成後輸入無效的正式錄製時間")

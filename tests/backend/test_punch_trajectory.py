@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+from uuid import uuid4
 
 import pytest
 
@@ -20,6 +21,7 @@ from bap_backend.app.services.punch_trajectory import (
 )
 from bap_common.analysis_contracts import ContractError, builtin_analysis_specifications
 from bap_common.imu_csv import COMMON_IMU_CSV_HEADER
+from bap_common.analysis_session import AnalysisInputBinding
 
 
 BOUNDARY_US = 2_000_000
@@ -28,6 +30,67 @@ PARAMETERS = {
     "measurement_start_elapsed_us": BOUNDARY_US,
 }
 DIRECT_PARAMETERS = {"measurement_start_elapsed_us": 1}
+
+
+@pytest.mark.parametrize("hand", ("left", "right"))
+@pytest.mark.scenario("punch-trajectory-analysis", "Only the left wrist is worn")
+@pytest.mark.scenario("punch-trajectory-analysis", "Only the right wrist is worn")
+def test_direct_single_wrist_uses_its_own_heading_and_hand(hand) -> None:
+    payload = trajectory_csv(
+        event_centers=(60, 120), rows=200,
+        quaternion=(math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)),
+    )
+    result = PunchTrajectoryExecutor().execute(
+        inputs={f"{hand}_wrist": payload}, parameters=DIRECT_PARAMETERS,
+    )
+    other = "right" if hand == "left" else "left"
+    assert result[f"{hand}_punch_count"] == 2
+    assert result[f"{other}_punch_count"] == 0
+    assert result["total_punch_count"] == 2
+    assert result["quality_status"] == "valid"
+    assert result["warnings"] == []
+    assert {item["hand"] for item in result["trajectories"]} == {hand}
+    paired = PunchTrajectoryExecutor().execute(
+        inputs={"left_wrist": payload, "right_wrist": payload}, parameters=DIRECT_PARAMETERS,
+    )
+    assert result["trajectories"] == [t for t in paired["trajectories"] if t["hand"] == hand]
+    direct_trajectory_specification().validate_result(result)
+
+
+@pytest.mark.parametrize("hand", ("left", "right"))
+def test_v3_contract_accepts_single_wrist_but_v2_still_requires_both(hand) -> None:
+    csv_id = uuid4()
+    bindings = (AnalysisInputBinding(input_role=f"{hand}_wrist", csv_id=csv_id),)
+    direct_trajectory_specification().validate_inputs(bindings, {str(csv_id)})
+    with pytest.raises(ContractError) as captured:
+        trajectory_specification().validate_inputs(bindings, {str(csv_id)})
+    assert captured.value.code == "missing_input_role"
+
+
+@pytest.mark.parametrize("roles, code", [
+    ((), "missing_input_role"),
+    (("head",), "unknown_input_role"),
+    (("left_wrist", "left_wrist"), "duplicate_input_role"),
+    (("left_wrist", "right_wrist"), "duplicate_csv_binding"),
+])
+@pytest.mark.scenario("punch-trajectory-analysis", "Missing or duplicate assignment")
+def test_optional_wrist_contract_still_rejects_invalid_bindings(roles, code) -> None:
+    csv_id = uuid4()
+    bindings = tuple(AnalysisInputBinding(input_role=role, csv_id=csv_id) for role in roles)
+    with pytest.raises(ContractError) as captured:
+        direct_trajectory_specification().validate_inputs(bindings, {str(csv_id)})
+    assert captured.value.code == code
+
+
+@pytest.mark.parametrize("roles, code", [
+    ((), "missing_input_role"), (("head",), "unknown_input_role"),
+])
+def test_executor_rejects_missing_or_unknown_wrist(roles, code) -> None:
+    with pytest.raises(ContractError) as captured:
+        PunchTrajectoryExecutor().execute(
+            inputs={role: b"" for role in roles}, parameters=DIRECT_PARAMETERS,
+        )
+    assert captured.value.code == code
 
 
 def trajectory_csv(

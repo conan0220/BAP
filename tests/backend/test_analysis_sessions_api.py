@@ -548,12 +548,24 @@ def test_real_punch_speed_executor_completes_over_http(tmp_path):
 
 @pytest.mark.scenario("punch-trajectory-analysis", "Backend 回傳一拳的有效軌跡")
 @pytest.mark.scenario("punch-trajectory-analysis", "user 開始出拳軌跡測量")
-def test_real_punch_trajectory_v3_executor_completes_over_http_and_preserves_csv(tmp_path):
+@pytest.mark.parametrize("hands", [("left", "right"), ("left",), ("right",)])
+def test_real_punch_trajectory_v3_executor_completes_over_http_and_preserves_csv(tmp_path, hands):
     client, factory, engine = make_context(tmp_path, with_executor=False)
     client.app.state.analysis_registry.register_executor(
         "punch_trajectory", 3, PunchTrajectoryExecutor()
     )
     metadata, contents = build_punch_trajectory_package(spec_version=3)
+    job = metadata.analyses[0]
+    bindings = tuple(binding for binding in job.input_bindings if binding.input_role in {
+        f"{hand}_wrist" for hand in hands
+    })
+    csv_ids = {binding.csv_id for binding in bindings}
+    descriptors = tuple(item for item in metadata.csv_files if item.csv_id in csv_ids)
+    contents = {item.filename: contents[item.filename] for item in descriptors}
+    metadata = metadata.model_copy(update={
+        "csv_files": descriptors,
+        "analyses": (job.model_copy(update={"input_bindings": bindings}),),
+    })
     original_hashes = {name: inspect_common_imu_csv_bytes(data).sha256 for name, data in contents.items()}
     with client:
         headers = authenticated(client)
@@ -563,13 +575,14 @@ def test_real_punch_trajectory_v3_executor_completes_over_http_and_preserves_csv
             f"{metadata.analyses[0].analysis_id}", headers=headers,
         ).json()
         assert payload["status"] == "completed"
-        assert payload["result"]["total_punch_count"] == 2
+        assert payload["result"]["total_punch_count"] == len(hands)
+        assert {item["hand"] for item in payload["result"]["trajectories"]} == set(hands)
         assert payload["result"]["coordinate_system"] == "session_local_x_right_y_forward_z_up"
         with factory() as session:
             job = session.get(AnalysisJob, str(metadata.analyses[0].analysis_id))
             assert json.loads(job.result.result_json) == payload["result"]
             saved = tuple(session.scalars(select(ImuCsvFile)))
-            assert len(saved) == 2
+            assert len(saved) == len(hands)
             assert {
                 item.filename: inspect_common_imu_csv_bytes(item.csv_blob).sha256 for item in saved
             } == original_hashes

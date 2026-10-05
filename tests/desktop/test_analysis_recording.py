@@ -515,7 +515,8 @@ def test_two_stage_recording_adds_two_second_boundary_to_analysis_parameters(
 
 
 @pytest.mark.scenario("punch-trajectory-analysis", "直接開始正式錄製")
-def test_trajectory_version_three_starts_without_calibration(tmp_path: Path) -> None:
+@pytest.mark.parametrize("hands", [("left", "right"), ("left",), ("right",)])
+def test_trajectory_version_three_starts_without_calibration(tmp_path: Path, hands) -> None:
     class FakeCapture:
         def __init__(self, root, *, assignments, monotonic, **_kwargs):
             self.sources = tuple(assignments.values())
@@ -536,8 +537,8 @@ def test_trajectory_version_three_starts_without_calibration(tmp_path: Path) -> 
     recording = LiveAnalysisRecording(
         tmp_path,
         assignments={
-            "left_wrist": ImuSource("COM5", ConnectionType.WIRED),
-            "right_wrist": ImuSource("COM6", ConnectionType.WIRED),
+            f"{hand}_wrist": ImuSource(f"COM{index + 5}", ConnectionType.WIRED)
+            for index, hand in enumerate(hands)
         },
         analysis_type="punch_trajectory",
         spec_version=3,
@@ -552,6 +553,10 @@ def test_trajectory_version_three_starts_without_calibration(tmp_path: Path) -> 
     assert not recording.is_calibrating
     assert recording.elapsed_seconds() == 0
     assert recording.job.parameters == {"measurement_start_elapsed_us": 1}
+    assert len(recording.capture.sources) == len(hands)
+    assert {binding.input_role for binding in recording.job.input_bindings} == {
+        f"{hand}_wrist" for hand in hands
+    }
 
 
 @pytest.mark.scenario("common-imu-csv", "Session 使用不同 Port 的兩顆有線 IMU")

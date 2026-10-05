@@ -169,9 +169,14 @@ def analyze_single_wrist_trajectories(
 
 class PunchTrajectoryExecutor:
     def execute(self, *, inputs: dict[str, bytes], parameters: dict) -> dict:
-        if set(inputs) != {"left_wrist", "right_wrist"}:
-            raise ContractError("missing_input_role", "出拳軌跡需要左、右手腕兩份 CSV")
+        roles = set(inputs)
+        if roles - {"left_wrist", "right_wrist"}:
+            raise ContractError("unknown_input_role", "出拳軌跡只接受左手腕或右手腕 CSV")
+        if not roles:
+            raise ContractError("missing_input_role", "出拳軌跡至少需要左手腕或右手腕一份 CSV")
         calibration_end = parameters.get("calibration_end_elapsed_us")
+        if calibration_end is not None and roles != {"left_wrist", "right_wrist"}:
+            raise ContractError("missing_input_role", "舊版校正流程需要左、右手腕兩份 CSV")
         measurement_start = parameters.get("measurement_start_elapsed_us")
         if (
             isinstance(measurement_start, bool)
@@ -188,52 +193,42 @@ class PunchTrajectoryExecutor:
         ):
             raise ContractError("invalid_parameter", "出拳軌跡的錄製時間邊界無效")
         try:
-            left_samples = read_motion_imu_csv(inputs["left_wrist"])
-            right_samples = read_motion_imu_csv(inputs["right_wrist"])
             warnings: list[str] = []
-            if direct_recording:
-                left_start = direct_measurement_index(left_samples, measurement_start)
-                right_start = direct_measurement_index(right_samples, measurement_start)
-                left_reference = left_start
-                right_reference = right_start
-                left_heading = calibration_heading(left_samples[:1], 1)
-                right_heading = calibration_heading(right_samples[:1], 1)
-            else:
-                left_reference, left_start = calibration_and_measurement_indices(
-                    left_samples, calibration_end, measurement_start
+            prepared = {}
+            for hand in ("left", "right"):
+                role = f"{hand}_wrist"
+                if role not in inputs:
+                    continue
+                samples = read_motion_imu_csv(inputs[role])
+                if direct_recording:
+                    start = direct_measurement_index(samples, measurement_start)
+                    reference = start
+                    heading = calibration_heading(samples[:1], 1)
+                else:
+                    reference, start = calibration_and_measurement_indices(
+                        samples, calibration_end, measurement_start
+                    )
+                    heading, unstable = _calibration_heading_with_warning(samples, reference)
+                    if unstable and UNSTABLE_CALIBRATION_WARNING not in warnings:
+                        warnings.append(UNSTABLE_CALIBRATION_WARNING)
+                prepared[hand] = (samples, reference, start, heading)
+
+            # A single wrist supplies its own heading; paired recordings keep
+            # the existing shared frame and inconsistent-heading warning.
+            heading = next(iter(prepared.values()))[3]
+            if len(prepared) == 2:
+                try:
+                    heading = validate_paired_headings(prepared["left"][3], prepared["right"][3])
+                except ImuMotionDataError as error:
+                    if error.code != "inconsistent_heading":
+                        raise
+                    warnings.append(INCONSISTENT_INITIAL_ORIENTATION_WARNING)
+            by_hand = {"left": [], "right": []}
+            for hand, (samples, reference, start, _heading) in prepared.items():
+                by_hand[hand] = analyze_single_wrist_trajectories(
+                    samples, start, heading, hand=hand, calibration_end_index=reference,
                 )
-                right_reference, right_start = calibration_and_measurement_indices(
-                    right_samples, calibration_end, measurement_start
-                )
-                left_heading, left_unstable = _calibration_heading_with_warning(
-                    left_samples, left_reference
-                )
-                right_heading, right_unstable = _calibration_heading_with_warning(
-                    right_samples, right_reference
-                )
-                if left_unstable or right_unstable:
-                    warnings.append(UNSTABLE_CALIBRATION_WARNING)
-            try:
-                heading = validate_paired_headings(left_heading, right_heading)
-            except ImuMotionDataError as error:
-                if error.code != "inconsistent_heading":
-                    raise
-                heading = left_heading
-                warnings.append(INCONSISTENT_INITIAL_ORIENTATION_WARNING)
-            left = analyze_single_wrist_trajectories(
-                left_samples,
-                left_start,
-                heading,
-                hand="left",
-                calibration_end_index=left_reference,
-            )
-            right = analyze_single_wrist_trajectories(
-                right_samples,
-                right_start,
-                heading,
-                hand="right",
-                calibration_end_index=right_reference,
-            )
+            left, right = by_hand["left"], by_hand["right"]
         except ImuMotionDataError as error:
             raise ContractError(error.code, error.message) from error
         trajectories = sorted(

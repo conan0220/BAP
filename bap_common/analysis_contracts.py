@@ -106,6 +106,9 @@ class AnalysisSpecification(BaseModel):
         if unknown:
             raise ContractError("unknown_input_role", f"未知的 Input Role：{', '.join(unknown)}")
 
+        if self.analysis_type == "punch_trajectory" and self.spec_version == 3 and not by_role:
+            raise ContractError("missing_input_role", "出拳軌跡至少需要左手腕或右手腕一份 CSV")
+
         for role_name, role in known_roles.items():
             count = len(by_role.get(role_name, ()))
             if role.required and count == 0:
@@ -623,7 +626,7 @@ def builtin_analysis_specifications() -> tuple[AnalysisSpecification, ...]:
             analysis_type="punch_trajectory",
             spec_version=3,
             display_name="出拳軌跡",
-            input_roles=wrist_roles,
+            input_roles=tuple(role.model_copy(update={"required": False}) for role in wrist_roles),
             parameter_names=("measurement_start_elapsed_us",),
             result_fields=(
                 ResultFieldSpecification(name="algorithm_version", value_type=ResultValueType.STRING),

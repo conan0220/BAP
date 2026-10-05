@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QWidget
 
 from bap_desktop.ui.punch_items.trajectory_view import (
     MatplotlibTrajectoryCanvas,
     TrajectoryResultView,
+    trajectory_limits,
 )
 
 
@@ -52,6 +55,13 @@ class FakeCanvas:
         self.widget = QWidget()
         self.shown = []
         self.cameras = []
+        self.comparisons = []
+
+    def configure_result(self, trajectories):
+        self.reference = trajectories
+
+    def show_trajectories(self, trajectories, *, side_by_side=False):
+        self.comparisons.append((trajectories, side_by_side))
 
     def show_trajectory(self, value):
         self.shown.append(value)
@@ -149,3 +159,137 @@ def test_empty_result_explains_that_no_punch_was_detected(qtbot) -> None:
     view = TrajectoryResultView(payload, canvas_factory=FakeCanvas)
     qtbot.addWidget(view)
     assert "沒有偵測到" in view.summary.text()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "Compare a selected subset across hands")
+def test_checking_punches_compares_across_hands_and_preserves_selection(qtbot) -> None:
+    source = result()
+    original = deepcopy(source)
+    canvas = FakeCanvas()
+    view = TrajectoryResultView(source, canvas_factory=lambda: canvas)
+    qtbot.addWidget(view)
+    view.display_mode.setCurrentIndex(view.display_mode.findData("overlay"))
+    view.punch_checks.topLevelItem(1).setCheckState(0, Qt.CheckState.Checked)
+    assert [(t["hand"], t["punch_index"]) for t in canvas.comparisons[-1][0]] == [
+        ("left", 1), ("right", 1),
+    ]
+    assert "已選 2 拳" in view.summary.text()
+    assert not canvas.comparisons[-1][1]
+
+    view.display_mode.setCurrentIndex(view.display_mode.findData("grid"))
+    assert canvas.comparisons[-1][1]
+    assert len(canvas.comparisons[-1][0]) == 2
+    view.display_mode.setCurrentIndex(view.display_mode.findData("single"))
+    view.punch_selector.setCurrentIndex(1)
+    assert canvas.shown[-1]["punch_index"] == 2
+    view.display_mode.setCurrentIndex(view.display_mode.findData("overlay"))
+    assert len(view.selected_trajectories()) == 2
+    assert source == original
+    assert view.result == original
+    assert len(set(distance for _, distance in canvas.cameras)) == 1
+
+
+@pytest.mark.parametrize("mode", ["overlay", "grid"])
+@pytest.mark.scenario("punch-trajectory-analysis", "Clear comparison selection")
+def test_select_all_and_clear_leave_no_stale_trajectories(qtbot, mode) -> None:
+    view = TrajectoryResultView(result())
+    qtbot.addWidget(view)
+    view.display_mode.setCurrentIndex(view.display_mode.findData(mode))
+    view.select_all_button.click()
+    canvas = view._canvas
+    assert len(view.selected_trajectories()) == 3
+    assert sum(len(axes.lines) for axes in canvas.figure.axes) == 3
+    view.clear_selection_button.click()
+    assert view.selected_trajectories() == []
+    assert "尚未選取" in view.summary.text()
+    assert sum(len(axes.lines) for axes in canvas.figure.axes) == 0
+    view.camera_buttons["reset"].click()
+    view.punch_checks.topLevelItem(2).setCheckState(0, Qt.CheckState.Checked)
+    assert sum(len(axes.lines) for axes in canvas.figure.axes) == 1
+
+
+def axes_limits(axes):
+    return axes.get_xlim(), axes.get_ylim(), axes.get_zlim()
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "Compare punches with different extents")
+def test_all_modes_keep_common_bounds_colors_and_equal_axis_scale(qtbot) -> None:
+    payload = result()
+    # Opposite-direction punches expose the clipping problem in a range based
+    # only on the largest individual punch's span.
+    for point in payload["trajectories"][0]["points"]:
+        point["y_m"] *= -4
+    original = deepcopy(payload)
+    view = TrajectoryResultView(payload)
+    qtbot.addWidget(view)
+    canvas = view._canvas
+    expected = axes_limits(canvas.axes)
+    spans = [high - low for low, high in expected]
+    assert spans == pytest.approx([spans[0]] * 3)
+    for trajectory_data in payload["trajectories"]:
+        for point in trajectory_data["points"]:
+            for axis, (low, high) in zip(("x_m", "y_m", "z_m"), expected):
+                assert low <= point[axis] <= high
+    view.punch_selector.setCurrentIndex(1)
+    assert axes_limits(canvas.axes) == expected
+    view.display_mode.setCurrentIndex(view.display_mode.findData("overlay"))
+    view.select_all_button.click()
+    colors = {line.get_label(): line.get_color() for line in canvas.axes.lines}
+    view.punch_checks.topLevelItem(0).setCheckState(0, Qt.CheckState.Unchecked)
+    assert axes_limits(canvas.axes) == expected
+    for line in canvas.axes.lines:
+        assert line.get_color() == colors[line.get_label()]
+    view.display_mode.setCurrentIndex(view.display_mode.findData("grid"))
+    assert len(canvas.figure.axes) == 2
+    for axes in canvas.figure.axes:
+        assert axes_limits(axes) == expected
+        assert axes.lines[0].get_color() == colors[axes.lines[0].get_label()]
+    assert payload == original
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "Manipulate side-by-side plots")
+def test_grid_camera_rotation_zoom_and_reset_are_shared(qtbot) -> None:
+    view = TrajectoryResultView(result())
+    qtbot.addWidget(view)
+    view.display_mode.setCurrentIndex(view.display_mode.findData("grid"))
+    view.select_all_button.click()
+    canvas = view._canvas
+    expected = axes_limits(canvas.axes)
+    source = canvas.figure.axes[1]
+    source.view_init(elev=30, azim=45, roll=10)
+    source.set_xlim(-0.1, 0.1)
+    source.set_ylim(-0.1, 0.1)
+    source.set_zlim(-0.1, 0.1)
+    canvas._synchronize_camera(SimpleNamespace(inaxes=source))
+    for axes in canvas.figure.axes:
+        assert (axes.elev, axes.azim, axes.roll) == (30, 45, 10)
+        assert axes_limits(axes) == axes_limits(source)
+    view.camera_buttons["top"].click()
+    view.camera_buttons["reset"].click()
+    for axes in canvas.figure.axes:
+        assert axes_limits(axes) == expected
+        assert (axes.elev, axes.azim, axes.roll) == (90, -90, 0)
+
+
+@pytest.mark.scenario("punch-trajectory-analysis", "Compare without a renderer")
+def test_comparison_fallback_keeps_per_punch_metrics(qtbot) -> None:
+    def fail():
+        raise RuntimeError("no renderer")
+
+    view = TrajectoryResultView(result(), canvas_factory=fail)
+    qtbot.addWidget(view)
+    view.display_mode.setCurrentIndex(view.display_mode.findData("grid"))
+    view.select_all_button.click()
+    assert "已選 3 拳" in view.summary.text()
+    row = view.punch_checks.topLevelItem(2)
+    assert [row.text(i) for i in range(1, 4)] == ["0.200", "0.800", "0.600"]
+    view.clear_selection_button.click()
+    view.camera_buttons["reset"].click()
+    assert "尚未選取" in view.summary.text()
+
+
+def test_stationary_points_have_nonzero_common_range() -> None:
+    item = trajectory("left", 1, 0)
+    for point in item["points"]:
+        point.update(x_m=0, y_m=0, z_m=0)
+    assert trajectory_limits([item]) == ((-0.05, 0.05),) * 3
