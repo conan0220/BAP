@@ -305,6 +305,8 @@ class PunchItemPage(QWidget):
                 "請從同一個無線接收器與 Group 選擇兩顆不同 IMU，"
                 "並分別指定為沙袋上方與沙袋下方。"
             )
+        elif self.definition.analysis_type == "punch_trajectory":
+            self.status.setText("出拳軌跡：左手、右手或雙手，至少一側配戴 IMU。")
         for placement in self.definition.placements:
             self._add_assignment_row(placement, sources)
         selectors = list(self._source_selectors)
@@ -312,7 +314,7 @@ class PunchItemPage(QWidget):
             QWidget.setTabOrder(current, following)
         if selectors:
             QWidget.setTabOrder(selectors[-1], self.continue_button)
-        if len(sources) < len(self.definition.placements):
+        if len(sources) < self.definition.minimum_imu_count:
             self.message.setText(text.DISCOVERY_INSUFFICIENT)
             self.message.setVisible(True)
         self._validate_assignments()
@@ -349,7 +351,8 @@ class PunchItemPage(QWidget):
         label.setWordWrap(True)
         selector = QComboBox()
         selector.setAccessibleName(f"{placement.name}使用的 IMU")
-        selector.addItem(text.IMU_PLACEHOLDER, None)
+        placeholder = "未配戴" if self.definition.analysis_type == "punch_trajectory" else text.IMU_PLACEHOLDER
+        selector.addItem(placeholder, None)
         for source in sources:
             selector.addItem(source.label, source)
         label.setBuddy(selector)
@@ -392,7 +395,7 @@ class PunchItemPage(QWidget):
                 self.assignments[placement.id] = source
                 selected.append(source)
 
-        complete = len(self.assignments) == len(self.definition.placements) > 0
+        complete = 0 < self.definition.minimum_imu_count <= len(self.assignments) <= len(self.definition.placements)
         unique = len(set(selected)) == len(selected)
         same_gateway = True
         if self.definition.analysis_type in {"punch_classification", "punch_force"} and len(selected) == 2:
@@ -419,7 +422,7 @@ class PunchItemPage(QWidget):
         elif complete and not confirmed:
             self.message.setText("請先確認兩顆 IMU 的安裝位置、方向與左右定義。")
             self.message.setVisible(True)
-        elif len(self._latest_sources) < len(self.definition.placements):
+        elif len(self._latest_sources) < self.definition.minimum_imu_count:
             self.message.setText(text.DISCOVERY_INSUFFICIENT)
             self.message.setVisible(True)
         else:
@@ -455,9 +458,11 @@ class PunchItemPage(QWidget):
             self.start_discovery()
 
     def _prepare_session(self) -> None:
-        required = len(self.definition.placements)
         selected = tuple(self.assignments.values())
-        if len(selected) != required or len(set(selected)) != required:
+        if (
+            not self.definition.minimum_imu_count <= len(selected) <= len(self.definition.placements)
+            or len(set(selected)) != len(selected)
+        ):
             return
         if (
             self.definition.analysis_type == "punch_classification"
@@ -483,6 +488,13 @@ class PunchItemPage(QWidget):
         if capability is None or not capability.executable:
             self._show_unavailable()
             return
+        if self.definition.analysis_type == "punch_trajectory" and len(self.assignments) == 1:
+            if any(
+                role.required and role.name not in self.assignments
+                for role in capability.specification.input_roles
+            ):
+                self._show_error("Backend 尚未支援單側軌跡測量，請更新並重新啟動 Backend。")
+                return
         self._clear_source_selectors()
         self.installation_confirmation.setVisible(False)
         self.message.setVisible(False)

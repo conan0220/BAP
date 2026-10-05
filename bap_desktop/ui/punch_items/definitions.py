@@ -21,6 +21,10 @@ class PunchItemDefinition:
     configuration_decided: bool = True
     spec_version: int = 1
 
+    @property
+    def minimum_imu_count(self) -> int:
+        return 1 if self.analysis_type == "punch_trajectory" else len(self.placements)
+
 
 WRIST_PLACEMENTS = (
     ImuPlacement("left_wrist", "左手腕", "拳擊手"),
@@ -49,7 +53,7 @@ PUNCH_ITEM_DEFINITIONS = {
     "出拳軌跡": PunchItemDefinition(
         "出拳軌跡",
         "punch_trajectory",
-        "指定左右手腕 IMU，以互動式 3D 圖查看每一拳的動作路徑。",
+        "左手、右手或雙手穿戴 IMU，查看每一拳的 3D 動作路徑。",
         WRIST_PLACEMENTS,
         spec_version=3,
     ),
